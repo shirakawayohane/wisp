@@ -119,14 +119,11 @@ pub fn parse_type<'a>(tokens: &'a [Token<'a>]) -> ParseResult<'a> {
     }
 
     let rest = &tokens[1..];
-    dbg!(rest);
     if let Some(not_type_annotation_token_index) = rest.iter().position(|token| match token.body {
         TokenKind::Symbol(_) => false,
         _ => true,
     }) {
-        dbg!(not_type_annotation_token_index);
         let type_annotation_tokens = &rest[..not_type_annotation_token_index];
-        dbg!(type_annotation_tokens);
         if type_annotation_tokens.len() == 1 {
             match type_annotation_tokens[0].body {
                 TokenKind::Symbol(_) => ParseResult::Ok((
