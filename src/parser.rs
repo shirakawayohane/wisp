@@ -18,7 +18,6 @@ pub enum ASTNode<'a> {
     Symbol(&'a Token<'a>),
     F32Literal(&'a Token<'a> /* F32Literal */),
     Type(&'a Token<'a>, Box<ASTNode<'a>> /* List or Symbol */),
-    Empty,
 }
 
 type ParseResult<'a> = Result<(ASTNode<'a>, &'a [Token<'a>]), String>;

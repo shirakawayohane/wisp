@@ -11,6 +11,7 @@ use tokenizer::tokenize;
 mod emitter;
 mod parser;
 mod tokenizer;
+mod transformer;
 
 #[derive(Debug)]
 enum CompileError {
