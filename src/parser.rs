@@ -1,4 +1,5 @@
-use crate::tokenizer::{Pos, Token, TokenKind};
+use crate::tokenizer::{Token, TokenKind};
+use crate::pos::Pos;
 
 pub enum Type<'a> {
     Symbol(&'a Token<'a>),
@@ -10,14 +11,26 @@ pub struct Param<'a> {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, PartialEq)]
-pub enum ASTNode<'a> {
+#[derive(Debug)]
+pub enum ASTNodeKind<'a> {
     Module(Vec<ASTNode<'a>>), // Root of AST
     List(Vec<ASTNode<'a>>),
     Vector(Vec<ASTNode<'a>>),
     Symbol(&'a Token<'a>),
     F32Literal(&'a Token<'a> /* F32Literal */),
     Type(&'a Token<'a>, Box<ASTNode<'a>> /* List or Symbol */),
+}
+
+#[derive(Debug)]
+pub struct ASTNode<'a> {
+    kind: ASTNodeKind<'a>,
+    pos: Pos
+}
+
+impl<'a> ASTNode<'a> {
+    pub fn new(kind: ASTNodeKind<'a>, pos: Pos) -> Self {
+        ASTNode { kind, pos }
+    }
 }
 
 type ParseResult<'a> = Result<(ASTNode<'a>, &'a [Token<'a>]), String>;
@@ -32,9 +45,9 @@ pub fn parse_expr<'a>(tokens: &'a [Token<'a>]) -> ParseResult<'a> {
         TokenKind::LParen => parse_list(tokens),
         TokenKind::LBracket => parse_vector(tokens),
         TokenKind::Colon => parse_type(tokens),
-        TokenKind::Symbol(_) => ParseResult::Ok((ASTNode::Symbol(&first_token), &tokens[1..])),
-        TokenKind::F32Literal(_) => {
-            ParseResult::Ok((ASTNode::F32Literal(&first_token), &tokens[1..]))
+        TokenKind::Symbol(sym) => ParseResult::Ok((ASTNode::new(ASTNodeKind::Symbol(&first_token), first_token.pos), &tokens[1..])),
+        TokenKind::F32Literal(token) => {
+            ParseResult::Ok((ASTNode::new(ASTNodeKind::F32Literal(&first_token), first_token.pos), &tokens[1..]))
         }
         _ => ParseResult::Err("Unexpected token".to_string()),
     }

@@ -8,10 +8,11 @@ use emitter::EmitResult;
 use parser::parse_module;
 use tokenizer::tokenize;
 
-mod emitter;
-mod parser;
+mod pos;
 mod tokenizer;
+mod parser;
 mod transformer;
+mod emitter;
 
 #[derive(Debug)]
 enum CompileError {
