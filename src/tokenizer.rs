@@ -1,5 +1,5 @@
 use std::fmt::Display;
-use crate::pos::Pos;
+use crate::pos::SourceRange;
 
 #[allow(dead_code)]
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -41,13 +41,13 @@ impl<'a> Display for TokenKind<'a> {
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Token<'a> {
-    pub pos: Pos,
-    pub body: TokenKind<'a>,
+    pub kind: TokenKind<'a>,
+    pub range: SourceRange,
 }
 
 impl<'a> Token<'a> {
-    pub fn new(pos: Pos, body: TokenKind<'a>) -> Self {
-        Token { pos, body }
+    pub fn new(kind: TokenKind<'a>, range: SourceRange) -> Self {
+        Token { kind, range }
     }
 }
 
@@ -57,7 +57,7 @@ pub fn tokenize_test() {
         tokenize("(defn add [a : i32 b : i32] (3.14, 3.14))")
             .unwrap()
             .iter()
-            .map(|t| t.body)
+            .map(|t| t.kind)
             .collect::<Vec<_>>(),
         vec![
             TokenKind::LParen,
@@ -91,13 +91,13 @@ pub fn tokenize_pos_test() {
     )
     .unwrap();
     assert_eq!(
-        tokens.iter().map(|token| token.pos).collect::<Vec<Pos>>(),
+        tokens.iter().map(|token| token.range).collect::<Vec<SourceRange>>(),
         vec![
-            Pos::new(1, 1, 1),
-            Pos::new(1, 2, 5),
-            Pos::new(2, 1, 1),
-            Pos::new(3, 1, 1),
-            Pos::new(3, 2, 2)
+            SourceRange::new(1, 1, 1, 1),
+            SourceRange::new(1, 2, 1, 5),
+            SourceRange::new(2, 1, 2, 1),
+            SourceRange::new(3, 1, 3, 1),
+            SourceRange::new(3, 2, 3, 2)
         ]
     )
 }
@@ -162,8 +162,8 @@ pub fn tokenize<'a>(source: &'a str) -> Result<Vec<Token<'a>>, String> {
                     }
                 }
             };
-            let pos = Pos::new(line, pos_in_line, pos_in_line + eaten - 1);
-            ret.push(Token::new(pos, body));
+            let range = SourceRange::new(line, pos_in_line, line, pos_in_line + eaten - 1);
+            ret.push(Token::new(body, range));
             pos_in_line += eaten;
             src = &src[eaten..];
         } else {
