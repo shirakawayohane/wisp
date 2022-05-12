@@ -10,6 +10,14 @@ pub struct Param<'a> {
     pub type_annotation: Type<'a>,
 }
 
+/*
+type := f32
+*/
+#[derive(Debug, PartialEq)]
+pub enum TypeSyntax {
+    F32
+}
+
 #[allow(dead_code)]
 #[derive(Debug, PartialEq)]
 pub enum ASTKind<'a> {
@@ -18,19 +26,13 @@ pub enum ASTKind<'a> {
     Vector(Vec<ASTNode<'a>>),
     Symbol(&'a str),
     F32Literal(f32),
-    Type(&'a Token<'a>, Box<ASTNode<'a>> /* List or Symbol */),
+    Type(TypeSyntax /* List or Symbol */),
 }
 
 #[derive(Debug, PartialEq)]
 pub struct ASTNode<'a> {
     kind: ASTKind<'a>,
-    pos: SourceRange
-}
-
-impl<'a> ASTNode<'a> {
-    pub fn new(kind: ASTKind<'a>, pos: SourceRange) -> Self {
-        ASTNode { kind, pos }
-    }
+    range: SourceRange
 }
 
 type ParseResult<'a> = Result<(ASTNode<'a>, &'a [Token<'a>]), String>;
@@ -45,9 +47,16 @@ pub fn parse_expr<'a>(tokens: &'a [Token<'a>]) -> ParseResult<'a> {
         TokenKind::LParen => parse_list(tokens),
         TokenKind::LBracket => parse_vector(tokens),
         TokenKind::Colon => parse_type(tokens),
-        TokenKind::Symbol(name) => ParseResult::Ok((ASTNode::new(ASTKind::Symbol(name), first_token.range), &tokens[1..])),
+        TokenKind::Symbol(name) => ParseResult::Ok(
+            (
+                ASTNode
+            { 
+            kind: ASTKind::Symbol(name), 
+              range: first_token.range
+            }
+            , &tokens[1..])),
         TokenKind::F32Literal(value) => {
-            ParseResult::Ok((ASTNode::new(ASTKind::F32Literal(value), first_token.range), &tokens[1..]))
+            ParseResult::Ok((ASTNode {kind: ASTKind::F32Literal(value), range: first_token.range}, &tokens[1..]))
         }
         _ => ParseResult::Err("Unexpected token".to_string()),
     }
@@ -87,21 +96,24 @@ list := (expr*)
 */
 pub fn parse_list<'a>(tokens: &'a [Token<'a>]) -> ParseResult<'a> {
     let (exprs, used, rest) = parse_exprs_sorrounded_by(tokens, TokenKind::LParen, TokenKind::RParen)?;
-    ParseResult::Ok((ASTNode::new(ASTKind::List(exprs), get_source_loc_from_tokens(used).unwrap()), rest))
+    ParseResult::Ok((ASTNode{kind: ASTKind::List(exprs), range: get_source_loc_from_tokens(used).unwrap()}, rest))
 }
 
 #[test]
 fn parse_list_test() {
-    let lp = Token::new(TokenKind::LParen, SourceRange::new(1, 1, 1, 1));
-    let one = Token::new(TokenKind::Symbol("one"), SourceRange::new(1, 2, 1, 4));
-    let two = Token::new(TokenKind::Symbol("two"), SourceRange::new(1, 6, 1, 8));
-    let rp = Token::new( TokenKind::RParenSourceRange::new(1, 9, 1, 9));
+    let lp = Token{kind: TokenKind::LParen, range: SourceRange::new(1, 1, 1, 1)};
+    let one = Token{kind: TokenKind::Symbol("one"), range: SourceRange::new(1, 2, 1, 4)};
+    let two = Token{kind: TokenKind::Symbol("two"), range: SourceRange::new(1, 6, 1, 8)};
+    let rp = Token{kind: TokenKind::RParen, range: SourceRange::new(1, 9, 1, 9)};
     let tokens = &[lp, one, two, rp];
     let (list, rest) = parse_list(tokens).unwrap();
-    let expect = ASTNode::new(
-        ASTKind::List(vec![ASTNode::new(ASTKind::Symbol("one"), SourceRange::new(1,2,1,4)),
-        ASTNode::new(ASTKind::Symbol("two"), SourceRange::new(1,6,1,8))]),
-     SourceRange::new(1,1,1,9));
+    let expect = ASTNode{
+        kind: ASTKind::List(vec![
+            ASTNode{kind: ASTKind::Symbol("one"),
+            range:  SourceRange::new(1,2,1,4)}, 
+            ASTNode{kind: ASTKind::Symbol("two"), 
+            range: SourceRange::new(1,6,1,8)}]),
+     range: SourceRange::new(1,1,1,9)};
     assert_eq!(list, expect);
     assert!(rest.is_empty());
 }
@@ -112,21 +124,25 @@ vector := [expr*]
 pub fn parse_vector<'a>(tokens: &'a [Token<'a>]) -> ParseResult<'a> {
     let (exprs, used, rest) =
         parse_exprs_sorrounded_by(tokens, TokenKind::LBracket, TokenKind::RBracket)?;
-        ParseResult::Ok((ASTNode::new(ASTKind::Vector(exprs), get_source_loc_from_tokens(used).unwrap()), rest))
+        ParseResult::Ok((ASTNode{kind: ASTKind::Vector(exprs), range: get_source_loc_from_tokens(used).unwrap()}, rest))
 }
 
 #[test]
 fn parse_vector_test() {
-    let lp = Token::new(SourceRange::new(1, 1, 1, 1), TokenKind::LParen);
-    let one = Token::new(SourceRange::new(1, 2, 1, 4), TokenKind::Symbol("one"));
-    let two = Token::new(SourceRange::new(1, 6, 1, 8), TokenKind::Symbol("two"));
-    let rp = Token::new(SourceRange::new(1, 9, 1, 9), TokenKind::RParen);
+    let lp = Token{range: SourceRange::new(1, 1, 1, 1), kind: TokenKind::LParen};
+    let one = Token{range: SourceRange::new(1, 2, 1, 4), kind: TokenKind::Symbol("one")};
+    let two = Token{range: SourceRange::new(1, 6, 1, 8),kind: TokenKind::Symbol("two")};
+    let rp = Token{range: SourceRange::new(1, 9, 1, 9), kind: TokenKind::RParen};
     let tokens = &[lp, one, two, rp];
     let (list, rest) = parse_list(tokens).unwrap();
-    let expect = ASTNode::new(
-        ASTKind::Vector(vec![ASTNode::new(ASTKind::Symbol("one"), SourceRange::new(1,2,1,4)),
-        ASTNode::new(ASTKind::Symbol("two"), SourceRange::new(1,6,1,8))]),
-     SourceRange::new(1,1,1,9));
+    let expect = ASTNode{
+        kind: ASTKind::Vector(vec![
+            ASTNode{kind: ASTKind::Symbol("one"), 
+                    range: SourceRange::new(1,2,1,4)
+        },
+        ASTNode{kind: ASTKind::Symbol("two"), 
+        range: SourceRange::new(1,6,1,8)}]),
+     range: SourceRange::new(1,1,1,9)};
     assert_eq!(list, expect);
     assert!(rest.is_empty());
 }
@@ -153,13 +169,13 @@ pub fn parse_type<'a>(tokens: &'a [Token<'a>]) -> ParseResult<'a> {
         let type_annotation_tokens = &rest[..not_type_annotation_token_index];
         if type_annotation_tokens.len() == 1 {
             match type_annotation_tokens[0].kind {
-                TokenKind::Symbol(_) => ParseResult::Ok((
-                    ASTNode::Type(
-                        &tokens[0],
-                        Box::new(ASTNode::Symbol(&type_annotation_tokens[0])),
-                    ),
-                    &rest[1..],
-                )),
+                TokenKind::F32 => ParseResult::Ok(
+                    (ASTNode {
+                        kind: ASTKind::Type(TypeSyntax::F32),
+                        range: SourceRange::new(0,0,0,0)
+                    },
+                    &rest[not_type_annotation_token_index..])
+                ),
                 _ => ParseResult::Err(format!("Invalid type syntax \n{}", rest[0].range)),
             }
         } else {

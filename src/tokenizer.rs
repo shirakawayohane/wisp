@@ -16,6 +16,7 @@ pub enum TokenKind<'a> {
     Pipe,            // |
     Comma, // , Note: Comma is almostly same as whitespace, but used for delimiting type annotation.
     F32Literal(f32), // e.g 3.14
+    F32,
     Symbol(&'a str), // e.g hoge
 }
 
@@ -34,6 +35,7 @@ impl<'a> Display for TokenKind<'a> {
             TokenKind::And => write!(f, "&"),
             TokenKind::Pipe => write!(f, "|"),
             TokenKind::F32Literal(val) => write!(f, "{}", val),
+            TokenKind::F32 => write!(f, "f32"),
             TokenKind::Symbol(sym) => write!(f, "{}", sym),
         }
     }
@@ -43,12 +45,6 @@ impl<'a> Display for TokenKind<'a> {
 pub struct Token<'a> {
     pub kind: TokenKind<'a>,
     pub range: SourceRange,
-}
-
-impl<'a> Token<'a> {
-    pub fn new(kind: TokenKind<'a>, range: SourceRange) -> Self {
-        Token { kind, range }
-    }
 }
 
 #[test]
@@ -113,7 +109,7 @@ pub fn tokenize<'a>(source: &'a str) -> Result<Vec<Token<'a>>, String> {
     loop {
         if let Some(c) = src.chars().next() {
             let mut eaten = 1;
-            let body = match c {
+            let kind = match c {
                 '\n' => {
                     line += 1;
                     pos_in_line = 1;
@@ -158,12 +154,15 @@ pub fn tokenize<'a>(source: &'a str) -> Result<Vec<Token<'a>>, String> {
                             })
                             .unwrap();
                         let name = &src[0..eaten];
-                        TokenKind::Symbol(name)
+                        match name {
+                            "f32" => TokenKind::F32,
+                            _ => TokenKind::Symbol(name)
+                        }
                     }
                 }
             };
             let range = SourceRange::new(line, pos_in_line, line, pos_in_line + eaten - 1);
-            ret.push(Token::new(body, range));
+            ret.push(Token{kind, range});
             pos_in_line += eaten;
             src = &src[eaten..];
         } else {
