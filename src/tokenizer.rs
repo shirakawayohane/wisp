@@ -1,5 +1,5 @@
-use std::fmt::Display;
 use crate::pos::SourceRange;
+use std::fmt::Display;
 
 #[allow(dead_code)]
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -16,7 +16,6 @@ pub enum TokenKind<'a> {
     Pipe,            // |
     Comma, // , Note: Comma is almostly same as whitespace, but used for delimiting type annotation.
     F32Literal(f32), // e.g 3.14
-    F32,
     Symbol(&'a str), // e.g hoge
 }
 
@@ -35,7 +34,6 @@ impl<'a> Display for TokenKind<'a> {
             TokenKind::And => write!(f, "&"),
             TokenKind::Pipe => write!(f, "|"),
             TokenKind::F32Literal(val) => write!(f, "{}", val),
-            TokenKind::F32 => write!(f, "f32"),
             TokenKind::Symbol(sym) => write!(f, "{}", sym),
         }
     }
@@ -87,7 +85,10 @@ pub fn tokenize_pos_test() {
     )
     .unwrap();
     assert_eq!(
-        tokens.iter().map(|token| token.range).collect::<Vec<SourceRange>>(),
+        tokens
+            .iter()
+            .map(|token| token.range)
+            .collect::<Vec<SourceRange>>(),
         vec![
             SourceRange::new(1, 1, 1, 1),
             SourceRange::new(1, 2, 1, 5),
@@ -154,15 +155,12 @@ pub fn tokenize<'a>(source: &'a str) -> Result<Vec<Token<'a>>, String> {
                             })
                             .unwrap();
                         let name = &src[0..eaten];
-                        match name {
-                            "f32" => TokenKind::F32,
-                            _ => TokenKind::Symbol(name)
-                        }
+                        TokenKind::Symbol(name)
                     }
                 }
             };
             let range = SourceRange::new(line, pos_in_line, line, pos_in_line + eaten - 1);
-            ret.push(Token{kind, range});
+            ret.push(Token { kind, range });
             pos_in_line += eaten;
             src = &src[eaten..];
         } else {

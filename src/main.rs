@@ -1,3 +1,6 @@
+#![feature(generators, generator_trait)]
+#![feature(conservative_impl_trait)]
+
 use std::{
     fmt::Binary,
     fs::{self, File},
@@ -8,11 +11,11 @@ use emitter::EmitResult;
 use parser::parse_module;
 use tokenizer::tokenize;
 
+mod emitter;
+mod parser;
 mod pos;
 mod tokenizer;
-mod parser;
 mod transformer;
-mod emitter;
 
 #[derive(Debug)]
 enum CompileError {
@@ -24,9 +27,7 @@ enum CompileError {
 fn compile<W: Write>(source: &str, writer: &mut W) -> Result<(), CompileError> {
     let tokens = tokenize(source).unwrap();
     let ast = parse_module(tokens.as_slice()).unwrap();
-    dbg!(ast);
-    emitter::emit_module(writer).unwrap();
-    Result::Ok(())
+    todo!();
 }
 
 fn main() {
