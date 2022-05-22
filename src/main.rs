@@ -1,13 +1,8 @@
-#![feature(generators, generator_trait)]
-#![feature(conservative_impl_trait)]
-
 use std::{
-    fmt::Binary,
     fs::{self, File},
-    io::{BufRead, BufWriter, Write},
+    io::{BufWriter, Write}, collections::HashMap,
 };
 
-use emitter::EmitResult;
 use parser::parse_module;
 use tokenizer::tokenize;
 
@@ -17,12 +12,17 @@ mod parser;
 mod pos;
 mod tokenizer;
 mod transformer;
+mod opcodes;
 
 #[derive(Debug)]
 enum CompileError {
     TokenizeError,
     ParseError,
     EmitError,
+}
+
+struct Hoge {
+    value: i32
 }
 
 fn compile<W: Write>(source: &str, writer: &mut W) -> Result<(), CompileError> {

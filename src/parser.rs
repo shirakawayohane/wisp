@@ -1,13 +1,9 @@
 use crate::pos::SourceRange;
 use crate::tokenizer::{Token, TokenKind};
 
-pub enum Type<'a> {
-    Symbol(&'a Token<'a>),
-}
-
-pub struct Param<'a> {
+pub struct Param {
     pub name: String,
-    pub type_annotation: Type<'a>,
+    pub type_annotation: TypeSyntax,
 }
 
 /*

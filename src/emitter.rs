@@ -1,17 +1,12 @@
 use crate::{
     encoder::write_u32,
-    parser::{Type, TypeSyntax},
-    transformer::{Expression, Function, Param, SemanticModel},
+    transformer::{Expression, Function, Variable, SemanticModel, Type}, opcodes::Opcode,
 };
-use anyhow::{anyhow, Result};
 use std::{
     collections::{vec_deque, HashMap, VecDeque},
-    fmt::write,
-    hash::Hash,
-    intrinsics::unreachable,
-    io::Write,
-    ops::Index,
+    hash::Hash, io::{Write, BufWriter}
 };
+use anyhow::{Result, Context};
 use thiserror::Error;
 
 #[allow(dead_code)]
@@ -41,49 +36,14 @@ pub enum Valtype {
     Unit = 0x40,
 }
 
-enum Opcodes {
-    Block = 0x02,
-    Loop = 0x03,
-    Br = 0x0c,
-    BrIf = 0x0d,
-    End = 0x0b,
-    Call = 0x10,
-    GetLocal = 0x20,
-    SetLocal = 0x21,
-    I32Store8 = 0x3a,
-    I32Const = 0x41,
-    I64Const = 0x42,
-    F32Const = 0x43,
-    F64Const = 0x44,
-    I32Eqz = 0x45,
-    I32Eq = 0x46,
-    I32Ne = 0x47,
-    I32LtS = 0x48,
-    I32LtU = 0x49,
-    I32GtS = 0x4A,
-    I32GtU = 0x4B,
-    I32LeS = 0x4C,
-    I32LeU = 0x4D,
-    I32GeS = 0x4E,
-    I32GeU = 0x4F,
-    I64Eqz = 0x50,
-    I64Eq = 0x51,
-    I64Ne = 0x52,
-    I64LtS = 0x53,
-    I64LtU = 0x54,
-    I64GtS = 0x55,
-    I64GtU = 0x56,
-    I64LeS = 0x57,
-    I64GeU = 0x58,
-    F32Eq = 0x5b,
-    F32Lt = 0x5d,
-    F32Gt = 0x5e,
-    I32And = 0x71,
-    F32Add = 0x92,
-    F32Sub = 0x93,
-    F32Mul = 0x94,
-    F32Div = 0x95,
-    I32TruncF32S = 0xa8
+#[test]
+fn valtype_bytemucking_test() {
+    let mut valtypes = vec![Valtype::I32, Valtype::I64, Valtype::F32, Valtype::F64];
+    let num_types = valtypes.len();
+    unsafe {
+        let bytes = &valtypes as *const _ as *const u8;
+        let slice = std::slice::from_raw_parts(bytes, num_types);
+    }
 }
 
 const FunctionType: u8 = 0x60;
@@ -115,9 +75,9 @@ struct FuncType {
 }
 
 #[inline]
-fn desolve_type(type_syntax: &TypeSyntax) -> Vec<Valtype> {
+fn desolve_type(type_syntax: &Type) -> Vec<Valtype> {
     match type_syntax {
-        TypeSyntax::F32 => vec![Valtype::F32],
+        Type::F32 => vec![Valtype::F32],
     }
 }
 fn get_func_type(func: &Function) -> FuncType {
@@ -125,67 +85,104 @@ fn get_func_type(func: &Function) -> FuncType {
         param_types: func
             .params
             .iter()
-            .flat_map(|param| desolve_type(&param.type_syntax))
+            .flat_map(|param| desolve_type(&param.ty))
             .collect::<Vec<_>>(),
         result_types: desolve_type(&func.return_type),
     }
 }
 // e.g (func (param f32 f32) (result i32)) => func 2(num params) i32 i32 1(num_results) i32
-fn emit_function_type(func_type: &FuncType) -> Vec<u8> {
-    [
-        vec![FunctionType],
-        write_u32(func_type.param_types.len() as u32),
-        func_type.param_types.iter().map(|t| (*t) as u8).collect(),
-        write_u32(func_type.result_types.len() as u32),
-        func_type.result_types.iter().map(|t| (*t) as u8).collect(),
-    ]
-    .concat()
+fn emit_function_type(w: &mut impl Write, func_type: &FuncType) -> Result<()> {
+    // (func
+    w.write(&[FunctionType])?;
+    let num_params = func_type.param_types.len();
+    // (param
+    write_u32(w, num_params as u32)?;
+    unsafe {
+        let bytes = &func_type.param_types as *const _ as *const u8;
+        let slice = std::slice::from_raw_parts(bytes, num_params);
+        w.write(slice)?;
+    } // (param.... )
+    // (result
+    let num_results = func_type.result_types.len();
+    write_u32(w, num_results as u32)?;
+    unsafe {
+        let bytes = &func_type.result_types as *const _ as *const u8;
+        let slice = std::slice::from_raw_parts(bytes, num_results);
+        w.write(slice)?;
+    }
+    Ok(())
 }
 
-type Frame = HashMap<String, (usize, TypeSyntax)>;
+struct FrameItem {
+    ty: Type,
+    desolved: Vec<Valtype>,
+    local_idx: u32,
+}
+type Frame = HashMap<String, FrameItem>;
 
-fn emit_block(Block type)
+fn get_frame_from_params(params: &Vec<Variable>, current_idx: u32) -> Frame {
+    // params
+    //     .iter()
+    //     .map(|param| {
+    //         (
+    //             param.name,
+    //             (
+    //                 frames
+    //                     .iter()
+    //                     .map(|x| x.len())
+    //                     .reduce(|a, b| a + b)
+    //                     .unwrap_or(0),
+    //                 param.ty,
+    //             ),
+    //         )
+    //     })
+    //     .collect()
+    todo!()
+}
 
-fn emit_expression(frames: &mut VecDeque<Frame>, expr: &Expression) -> Vec<u8> {
+fn emit_expression(w: &mut impl Write, frames: &mut VecDeque<Frame>, locals: &mut Vec<Valtype>, expr: &Expression)
+ -> Result<()> {
     match expr {
-        Expression::LetScope(params, child_exprs) => {
-            frames.push_front(
-                params
-                    .iter()
-                    .map(|param| {
-                        (
-                            param.name,
-                            (
-                                frames
-                                    .iter()
-                                    .map(|x| x.len())
-                                    .reduce(|a, b| a + b)
-                                    .unwrap_or(0),
-                                param.type_syntax,
-                            ),
-                        )
-                    })
-                    .collect(),
-            );
-            
-            vec![]
-        }
-        Expression::SymbolReference(sym) => {
-            vec![]
-        }
+        Expression::LetScope(params, exprs) => {
+            for param in params {
+                locals.append(&mut desolve_type(&param.ty));
+            }
+            frames.push_front(get_frame_from_params(params, ));
+            w.write(&[Opcode::Block as u8]);
+            for expr in exprs {
+                emit_expression(w, frames, locals, expr)?;
+            }
+            Ok(())
+        },
+        Expression::SymbolReference(v) => {
+            // スタックにおけるインデックスとプリミティブ型がわかればよい。
+            // プリミティブの場合はLoad。
+            match v.ty {
+
+            }
+        },
+        Expression::FunctionCall(func, args) => {
+            for arg in args {
+                emit_expression(w, frames, locals, arg)?;
+            }
+            w.write(&[Opcode::Call as u8])?;
+            write_u32(w, func.index);
+            Ok(())
+        },
         _ => todo!(),
     }
 }
 
-fn emit_function_body(frames: VecDeque<Frame>, func: &Function) -> Vec<u8> {
-    let mut code = Vec::new();
+fn emit_function_body(w: &mut impl Write, frames: &mut VecDeque<Frame>, func_table: &HashMap<String, u32>, func: &Function) -> Result<()> {
+    let mut func_body = Vec::new();
+    let mut locals = Vec::<Valtype>::new();
     for expr in func.exprs {
-        code.append(&mut emit_expression(frames, &expr))
+        emit_expression(&mut func_body, frames, &mut locals, &expr)?;
     }
-    code
+    Ok(())
 }
 
-fn emit_module(model: &SemanticModel) -> Vec<u8> {
+fn emit_module<W: Write>(w: &mut BufWriter<W>, model: &SemanticModel) -> Result<()> {
     let mut func_types = HashMap::<FuncType, u32>::new();
     let mut func_type_idxs: Vec<u32> = Vec::new();
     for function in &model.functions {
@@ -197,39 +194,42 @@ fn emit_module(model: &SemanticModel) -> Vec<u8> {
         }
     }
 
-    let mut type_section = Vec::new();
-    // num types
-    type_section.append(&mut write_u32(func_types.len() as u32));
-    for t in func_types.keys() {
-        type_section.append(&mut emit_function_type(t));
+    w.write(&WasmMagicNumber)?;
+    w.write(&WasmModuleVersion)?;
+
+    // Type section
+    {
+        let mut type_section = Vec::new();
+        for t in func_types.keys() {
+            emit_function_type(&mut type_section, t)?;
+        }
+        w.write(&[Section::Type as u8])?;
+        write_u32(w, type_section.len() as u32)?;
+        w.write(&type_section)?;
+        w.flush()?;
     }
 
     let num_functions = func_type_idxs.len() as u32;
-
-    let mut func_section = Vec::new();
-    // num functions
-    func_section.append(&mut write_u32(num_functions));
-    for idx in func_type_idxs {
-        func_section.append(&mut write_u32(idx));
+    { // Func Section
+        let mut func_section = Vec::new();
+        // num functions
+        write_u32(&mut func_section, num_functions)?;
+        for idx in func_type_idxs {
+            write_u32(&mut func_section, idx)?;
+        }
+        w.write(&func_section)?;
+        w.flush()?;
     }
-
-    let mut code_section = Vec::new();
-    // num functions
-    code_section.append(&mut write_u32(num_functions));
-    for func in &model.functions {
-        code_section.append(&mut emit_function_body(func));
+    { // Code Section
+        let mut code_section = Vec::new();
+        write_u32(&mut code_section, num_functions)?;
+        for func in &model.functions {
+            let frames = Vec::new();
+            emit_function_body(&mut code_section, &mut frames, func_table, func)?;
+        }
+        write_u32(w, code_section.len() as u32)?;
+        w.write(&code_section);
+        w.flush();
     }
-
-    let mut module = [WasmMagicNumber, WasmModuleVersion].concat();
-    module.push(Section::Type as u8);
-    module.append(&mut write_u32(type_section.len() as u32));
-    module.append(&mut type_section);
-    module.push(Section::Func as u8);
-    module.append(&mut write_u32(func_section.len() as u32));
-    module.append(&mut func_section);
-    module.push(Section::Code as u8);
-    module.append(&mut write_u32(code_section.len() as u32));
-    module.append(&mut code_section);
-
-    module
+    Ok(())
 }

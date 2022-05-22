@@ -1,18 +1,27 @@
+use std::io::Write;
+
+use anyhow::Result;
+
 #[test]
 pub fn test_write_f32() {
-    assert_eq!(write_f32(3.14), [0xc3, 0xf5, 0x48, 0x40]);
+    let mut buf = Vec::new();
+    write_f32(&mut buf, 3.14);
+    assert_eq!(buf, [0xc3, 0xf5, 0x48, 0x40]);
 }
 
-pub fn write_f32(value: f32) -> [u8; 4] {
-    value.to_le_bytes()
+pub fn write_f32(w: &mut impl Write, value: f32) -> Result<()> {
+    w.write(&value.to_le_bytes())?;
+    Ok(())
 }
 
 #[test]
 pub fn test_write_u32() {
-    assert_eq!(write_u32(123456), &[0xC0, 0xC4, 0x07]);
+    let mut buf = Vec::new();
+    write_u32(&mut buf, 123456).unwrap();
+    assert_eq!(buf, &[0xC0, 0xC4, 0x07]);
 }
 
-pub fn write_u32(val: u32) -> Vec<u8> {
+pub fn write_u32(w: &mut impl Write, val: u32) -> Result<()> {
     let mut n = val;
     let mut buf = [0_u8; 4];
     let mut written = 0;
@@ -25,20 +34,26 @@ pub fn write_u32(val: u32) -> Vec<u8> {
         buf[written] = byte;
         written += 1;
         if n == 0 {
-            return Vec::from(&buf[..written]);
+            w.write(&buf[..written])?;
+            break;
         }
     }
+    Ok(())
 }
 
 #[test]
 pub fn test_write_name() {
+    let mut buf = Vec::new();
+    encode_name(&mut buf, "addTwo").unwrap();
     assert_eq!(
-        encode_name("addTwo"),
+        buf,
         &[0x06, 0x61, 0x64, 0x64, 0x54, 0x77, 0x6f]
     );
 }
 
-pub fn encode_name(name: &str) -> Vec<u8> {
+pub fn encode_name(w: &mut impl Write, name: &str) -> Result<()> {
     let bytes = name.as_bytes();
-    [&write_u32(bytes.len() as u32), bytes].concat()
+    write_u32(&mut w, bytes.len() as u32)?;
+    w.write(bytes);
+    Ok(())
 }
