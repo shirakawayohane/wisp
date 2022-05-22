@@ -16,22 +16,22 @@ pub struct Param {
     pub type_syntax: TypeSyntax,
 }
 
-pub enum Expression<'a> {
-    VariableDecl(String, &'a Type),
+pub enum Expression {
+    LetScope(Vec<Param>, Vec<Expression>),
     FunctionCall(String),
     SymbolReference(String),
 }
 
-pub struct Function<'a> {
+pub struct Function {
     pub name: String,
-    pub params: &'a [Param],
+    pub params: Vec<Param>,
     pub return_type: TypeSyntax,
-    pub exprs: Vec<Expression<'a>>,
+    pub exprs: Vec<Expression>,
 }
 
 pub struct SemanticModel<'a> {
     pub types: Vec<&'a Type>,
-    pub functions: Vec<Function<'a>>,
+    pub functions: Vec<Function>,
 }
 
 type TransformResult = Result<(), String>;

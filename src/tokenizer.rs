@@ -73,7 +73,6 @@ pub fn tokenize_test() {
             TokenKind::RParen
         ]
     );
-    // assert!(!tokenize("3.14.159").is_err())
 }
 
 #[test]

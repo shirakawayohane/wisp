@@ -12,6 +12,7 @@ use parser::parse_module;
 use tokenizer::tokenize;
 
 mod emitter;
+mod encoder;
 mod parser;
 mod pos;
 mod tokenizer;
