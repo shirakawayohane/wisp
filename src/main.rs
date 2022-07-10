@@ -1,38 +1,23 @@
-use std::{
-    fs::{self, File},
-    io::{BufWriter, Write}, collections::HashMap,
-};
-
-use parser::parse_module;
-use tokenizer::tokenize;
+use anyhow::{ensure, Result};
+use emitter::Emitter;
+use std::{env, fs::File, io::{BufWriter}, path::{Path, PathBuf}};
 
 mod emitter;
-mod encoder;
+mod lexer;
 mod parser;
-mod pos;
-mod tokenizer;
-mod transformer;
-mod opcodes;
 
-#[derive(Debug)]
-enum CompileError {
-    TokenizeError,
-    ParseError,
-    EmitError,
-}
-
-struct Hoge {
-    value: i32
-}
-
-fn compile<W: Write>(source: &str, writer: &mut W) -> Result<(), CompileError> {
-    let tokens = tokenize(source).unwrap();
-    let ast = parse_module(tokens.as_slice()).unwrap();
-    todo!();
-}
-
-fn main() {
-    let source = fs::read_to_string("./sample.wisp").unwrap();
-    let mut writer = BufWriter::new(File::create("./sample.wasm").unwrap());
-    compile(&source, &mut writer).unwrap();
+fn main() -> Result<()> {
+    let args: Vec<String> = env::args().collect();
+    ensure!(args.len() > 0, "wispc needs 1 or more args.");
+    let source_path = Path::new(&args[0]);
+    let target_path = if args.len() > 1 {
+        PathBuf::from(&args[1])
+    } else {
+        Path::new(&args[0]).with_extension("hoge")
+    };
+    let source = std::fs::read_to_string(&source_path)?;
+    let target_file = File::open(&target_path)?;
+    let mut emitter = Emitter::new(BufWriter::new(target_file));
+    emitter.emit(&source)?;
+    Ok(())
 }
