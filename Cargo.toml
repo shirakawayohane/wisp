@@ -10,3 +10,4 @@ anyhow = "1.0.57"
 thiserror = "1.0.31"
 bytemuck = {version = "1.9.1", features = ["derive"]}
 leb128 = "0.2.5"
+dbg_hex = "0.1.1"

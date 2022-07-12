@@ -29,6 +29,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dbg_hex"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f74abed44e4dbc4d0548b565869c66c9c6d6d84011a8c14cee2cacfdada3d60"
+
+[[package]]
 name = "leb128"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -95,6 +101,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
+ "dbg_hex",
  "leb128",
  "thiserror",
 ]

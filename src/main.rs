@@ -1,23 +1,26 @@
 use anyhow::{ensure, Result};
 use emitter::Emitter;
-use std::{env, fs::File, io::{BufWriter}, path::{Path, PathBuf}};
+use std::{fs::File, io::{BufWriter}, path::{Path, PathBuf}};
 
+mod encoder;
 mod emitter;
 mod lexer;
 mod parser;
+mod env;
 
 fn main() -> Result<()> {
-    let args: Vec<String> = env::args().collect();
-    ensure!(args.len() > 0, "wispc needs 1 or more args.");
-    let source_path = Path::new(&args[0]);
-    let target_path = if args.len() > 1 {
-        PathBuf::from(&args[1])
+    let args: Vec<String> = std::env::args().collect();
+    ensure!(args.len() > 1, "wispc needs 1 or more args.");
+    let source_path = Path::new(&args[1]);
+    let target_path = if args.len() > 2 {
+        PathBuf::from(&args[2])
     } else {
-        Path::new(&args[0]).with_extension("hoge")
+        Path::new(&args[1]).with_extension("wasm")
     };
     let source = std::fs::read_to_string(&source_path)?;
-    let target_file = File::open(&target_path)?;
-    let mut emitter = Emitter::new(BufWriter::new(target_file));
+    let target_file = File::create(&target_path)?;
+    let mut writer = BufWriter::new(target_file);
+    let mut emitter = Emitter::new(&mut writer);
     emitter.emit(&source)?;
     Ok(())
 }

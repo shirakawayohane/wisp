@@ -1,4 +1,4 @@
-use anyhow::{Result};
+use anyhow::Result;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -54,4 +54,31 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>> {
         }
     }
     return Ok(ret);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_add() {
+        let tokens = tokenize("(defn addTwo (a b) (+ a b))").unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::LParen,
+                Token::Symbol("defn".to_string()),
+                Token::Symbol("addTwo".to_string()),
+                Token::LParen,
+                Token::Symbol("a".to_string()),
+                Token::Symbol("b".to_string()),
+                Token::RParen,
+                Token::LParen,
+                Token::Add,
+                Token::Symbol("a".to_string()),
+                Token::Symbol("b".to_string()),
+                Token::RParen,
+                Token::RParen
+            ]
+        )
+    }
 }
