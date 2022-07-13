@@ -1,2 +1,2 @@
-(defn addTwo (a b)
+(export defn addTwo (a b)
     (+ a b))
