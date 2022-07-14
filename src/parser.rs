@@ -1,16 +1,29 @@
 use crate::lexer::{tokenize, Token};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum AST {
-    Module(Vec<AST>),
-    NumberLiteral(String),
-    Symbol(String),
-    Add,
-    List(Vec<AST>),
+pub enum TypeAST {
+    I32,
 }
 
-fn parse_list(tokens: &mut Vec<Token>) -> Result<AST> {
+#[derive(Debug, Clone, PartialEq)]
+pub enum AST<'a> {
+    Module(Vec<AST<'a>>),
+    NumberLiteral(&'a str),
+    Symbol(&'a str),
+    SymbolWithAnnotation(&'a str, TypeAST),
+    Add,
+    List(Vec<AST<'a>>),
+}
+
+fn parse_type(tokens: &mut Vec<Token>) -> Result<TypeAST> {
+    Ok(match tokens.pop() {
+        Some(Token::Symbol("i32")) => TypeAST::I32,
+        _ => todo!(),
+    })
+}
+
+fn parse_list<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
     let token = tokens.pop();
     if token != Some(Token::LParen) {
         return Err(anyhow!(
@@ -21,7 +34,7 @@ fn parse_list(tokens: &mut Vec<Token>) -> Result<AST> {
     let mut list = Vec::new();
     while !tokens.is_empty() {
         let token = match tokens.pop() {
-            None => return Err(anyhow!("Did not find enough tokens")),
+            None => bail!("Did not find enough tokens"),
             Some(t) => t,
         };
         list.push(match token {
@@ -29,16 +42,24 @@ fn parse_list(tokens: &mut Vec<Token>) -> Result<AST> {
                 tokens.push(Token::LParen);
                 parse_list(tokens)?
             }
-            Token::NumberLiteral(val) => AST::NumberLiteral(val.to_string()),
+            Token::NumberLiteral(val) => AST::NumberLiteral(val),
             Token::Add => AST::Add,
-            Token::Symbol(name) => AST::Symbol(name.to_string()),
+            Token::Symbol(name) => {
+                if let Some(Token::Colon) = tokens.last() {
+                    tokens.pop();
+                    AST::SymbolWithAnnotation(name, parse_type(tokens)?)
+                } else {
+                    AST::Symbol(name)
+                }
+            }
             Token::RParen => return Ok(AST::List(list)),
+            Token::Colon => unreachable!("Colon should be processed in Symbol arm"),
         });
     }
     Ok(AST::List(list))
 }
 
-fn parse_module(tokens: &mut Vec<Token>) -> Result<AST> {
+fn parse_module<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
     let mut lists = Vec::new();
     while !tokens.is_empty() {
         dbg!(&tokens.last());
@@ -59,24 +80,24 @@ pub fn parse(source: &str) -> Result<AST> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_add() {
-        let ast = parse("(defn addTwo (a b) (+ a b))").unwrap();
+        let ast = parse(
+            "(defn addTwo : i32
+                      (a : i32 b : i32)
+                        (+ a b))",
+        )
+        .unwrap();
         assert_eq!(
             ast,
             AST::Module(vec![AST::List(vec![
-                AST::Symbol("defn".to_string()),
-                AST::Symbol("addTwo".to_string()),
+                AST::Symbol("defn"),
+                AST::SymbolWithAnnotation("addTwo", TypeAST::I32),
                 AST::List(vec![
-                    AST::Symbol("a".to_string()),
-                    AST::Symbol("b".to_string())
+                    AST::SymbolWithAnnotation("a", TypeAST::I32),
+                    AST::SymbolWithAnnotation("b", TypeAST::I32)
                 ]),
-                AST::List(vec![
-                    AST::Add,
-                    AST::Symbol("a".to_string()),
-                    AST::Symbol("b".to_string())
-                ])
+                AST::List(vec![AST::Add, AST::Symbol("a"), AST::Symbol("b")])
             ])])
         )
     }

@@ -159,11 +159,11 @@ impl<'a, W: Write> Emitter<'a, W> {
     fn emit_func(&mut self, ast: &AST, env: Rc<Env>) -> Result<()> {
         if let AST::List(func_list) = ast {
             let mut slice = &func_list[..];
-            let (is_export, name, args, forms) = match &func_list[0] {
+            let (is_export, name, args, forms) = match func_list[0] {
                 AST::Symbol(s) => {
                     let is_export = if s == "export" {
                         ensure!(
-                            slice[1] == AST::Symbol(DEFN_KEYWORD.to_string()),
+                            slice[1] == AST::Symbol(DEFN_KEYWORD),
                             "Failed to compile function. 'defn' is expected after 'export'"
                         );
                         slice = &slice[2..];
@@ -313,7 +313,9 @@ mod tests {
     fn test_add() {
         let mut buf = Vec::new();
         let mut emitter = Emitter::new(&mut buf);
-        emitter.emit("(defn addTwo (a b) (+ a b))").unwrap();
+        emitter.emit("(defn addTwo : i32
+                                (a : i32 b : i32)
+                                 (+ a b))").unwrap();
         assert_eq!(
             buf,
             vec![

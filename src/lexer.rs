@@ -1,12 +1,13 @@
 use anyhow::Result;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Token {
-    Symbol(String),
-    NumberLiteral(String),
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum Token<'a> {
+    Symbol(&'a str),
+    NumberLiteral(&'a str),
     Add,
     LParen,
     RParen,
+    Colon,
 }
 
 const SPECIAL_CHARS: &'static [char] = &['(', ')', '[', ']', '{', '}', '#'];
@@ -29,11 +30,12 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>> {
                 '(' => Token::LParen,
                 ')' => Token::RParen,
                 '+' => Token::Add,
+                ':' => Token::Colon,
                 _ => {
                     if c.is_digit(10) {
                         eaten = src.find(|c: char| c != '.' && !c.is_digit(10)).unwrap();
                         let value_str = &src[0..eaten];
-                        Token::NumberLiteral(value_str.to_string())
+                        Token::NumberLiteral(value_str)
                     } else {
                         eaten = src
                             .find(|c: char| {
@@ -42,7 +44,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>> {
                             .unwrap();
                         let name = &src[0..eaten];
                         match name {
-                            _ => Token::Symbol(name.to_string()),
+                            _ => Token::Symbol(name),
                         }
                     }
                 }
@@ -61,21 +63,32 @@ mod tests {
     use super::*;
     #[test]
     fn test_add() {
-        let tokens = tokenize("(defn addTwo (a b) (+ a b))").unwrap();
+        let tokens = tokenize(
+            "(defn addTwo : i32
+                       (a :i32 b: i32) 
+                         (+ a b))",
+        )
+        .unwrap();
         assert_eq!(
             tokens,
             vec![
                 Token::LParen,
-                Token::Symbol("defn".to_string()),
-                Token::Symbol("addTwo".to_string()),
+                Token::Symbol("defn"),
+                Token::Symbol("addTwo"),
+                Token::Colon,
+                Token::Symbol("i32"),
                 Token::LParen,
-                Token::Symbol("a".to_string()),
-                Token::Symbol("b".to_string()),
+                Token::Symbol("a"),
+                Token::Colon,
+                Token::Symbol("i32"),
+                Token::Symbol("b"),
+                Token::Colon,
+                Token::Symbol("i32"),
                 Token::RParen,
                 Token::LParen,
                 Token::Add,
-                Token::Symbol("a".to_string()),
-                Token::Symbol("b".to_string()),
+                Token::Symbol("a"),
+                Token::Symbol("b"),
                 Token::RParen,
                 Token::RParen
             ]
