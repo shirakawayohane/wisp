@@ -334,6 +334,9 @@ mod tests {
                 0x02, // section size
                 0x01, // num funcs
                 0x00, // signature index
+                0x07, // export section
+                0x01, // section size,
+                0x00, // num exports
                 0x0A, // code section
                 0x09, // section size
                 0x01, // num functions
