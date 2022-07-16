@@ -13,6 +13,7 @@ pub enum AST<'a> {
     Symbol(&'a str),
     SymbolWithAnnotation(&'a str, TypeAST),
     Add,
+    Sub,
     List(Vec<AST<'a>>),
 }
 
@@ -44,6 +45,7 @@ fn parse_list<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
             }
             Token::NumberLiteral(val) => AST::NumberLiteral(val),
             Token::Add => AST::Add,
+            Token::Sub => AST::Sub,
             Token::Symbol(name) => {
                 if let Some(Token::Colon) = tokens.last() {
                     tokens.pop();
@@ -80,25 +82,28 @@ pub fn parse(source: &str) -> Result<AST> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn test_add() {
+    fn test_bin_ops() {
         let ast = parse(
-            "(defn addTwo : i32
+            "(defn calc : i32
                       (a : i32 b : i32)
-                        (+ a b))",
+                        (+ a (- b 1)))",
         )
-        .unwrap();
+            .unwrap();
         assert_eq!(
             ast,
             AST::Module(vec![AST::List(vec![
                 AST::Symbol("defn"),
-                AST::SymbolWithAnnotation("addTwo", TypeAST::I32),
+                AST::SymbolWithAnnotation("calc", TypeAST::I32),
                 AST::List(vec![
                     AST::SymbolWithAnnotation("a", TypeAST::I32),
-                    AST::SymbolWithAnnotation("b", TypeAST::I32)
+                    AST::SymbolWithAnnotation("b", TypeAST::I32),
                 ]),
-                AST::List(vec![AST::Add, AST::Symbol("a"), AST::Symbol("b")])
-            ])])
-        )
+                AST::List(vec![AST::Add, AST::Symbol("a"),
+                               AST::List(vec![
+                                   AST::Sub,
+                                   AST::Symbol("b"),
+                                   AST::NumberLiteral("1")])])])]))
     }
 }

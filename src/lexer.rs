@@ -5,6 +5,7 @@ pub enum Token<'a> {
     Symbol(&'a str),
     NumberLiteral(&'a str),
     Add,
+    Sub,
     LParen,
     RParen,
     Colon,
@@ -30,6 +31,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>> {
                 '(' => Token::LParen,
                 ')' => Token::RParen,
                 '+' => Token::Add,
+                '-' => Token::Sub,
                 ':' => Token::Colon,
                 _ => {
                     if c.is_digit(10) {
@@ -61,6 +63,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_add() {
         let tokens = tokenize(
@@ -68,7 +71,7 @@ mod tests {
                        (a :i32 b: i32) 
                          (+ a b))",
         )
-        .unwrap();
+            .unwrap();
         assert_eq!(
             tokens,
             vec![
@@ -90,8 +93,14 @@ mod tests {
                 Token::Symbol("a"),
                 Token::Symbol("b"),
                 Token::RParen,
-                Token::RParen
+                Token::RParen,
             ]
         )
+    }
+
+    #[test]
+    fn test_sub() {
+        let tokens = tokenize("(- a 1)").unwrap();
+        assert_eq!(tokens, vec![Token::LParen, Token::Sub, Token::Symbol("a"), Token::NumberLiteral("1"), Token::RParen])
     }
 }

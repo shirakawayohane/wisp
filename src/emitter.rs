@@ -46,9 +46,11 @@ struct Signature {
 
 #[derive(PartialEq, Eq, Debug)]
 enum OpCode {
-    I32Add = 0x6a,
     End = 0x0b,
     LocalGet = 0x20,
+    I32Const = 0x41,
+    I32Add = 0x6a,
+    I32Sub = 0x6b,
 }
 
 fn emit_signature<W: Write>(writer: &mut W, signature: &Signature) -> Result<()> {
@@ -85,6 +87,11 @@ pub struct Emitter<'a, W: Write> {
     num_exports: u16,
 }
 
+enum BinOp {
+    Add,
+    Sub
+}
+
 impl<'a, W: Write> Emitter<'a, W> {
     pub fn new(writer: &'a mut W) -> Self {
         Emitter {
@@ -100,16 +107,22 @@ impl<'a, W: Write> Emitter<'a, W> {
             num_exports: 0,
         }
     }
-    fn emit_add<W2: Write>(
+    fn emit_bin_exp<W2: Write>(
         &mut self,
         writer: &mut W2,
+        op: BinOp,
         lhs: &AST,
         rhs: &AST,
         env: &mut Env,
     ) -> Result<()> {
         self.emit_obj(writer, lhs, env)?;
         self.emit_obj(writer, rhs, env)?;
-        writer.write(&[OpCode::I32Add as u8])?;
+        // ToDo: Change binop according to lhs and rhs type.
+        let opcode = match op {
+            BinOp::Add => OpCode::I32Add,
+            BinOp::Sub => OpCode::I32Sub,
+        };
+        writer.write(&[opcode as u8])?;
         Ok(())
     }
     fn emit_list<W2: Write>(&mut self, writer: &mut W2, ast: &AST, env: &mut Env) -> Result<()> {
@@ -121,9 +134,12 @@ impl<'a, W: Write> Emitter<'a, W> {
                 );
                 match &list[0] {
                     AST::Add => {
-                        self.emit_add(writer, &list[1], &list[2], env)?;
-                    }
-                    _ => todo!("Only + operator can be emitted for now."),
+                        self.emit_bin_exp(writer, BinOp::Add, &list[1], &list[2], env)?;
+                    },
+                    AST::Sub => {
+                        self.emit_bin_exp(writer, BinOp::Sub, &list[1], &list[2], env)?;
+                    },
+                    _ => todo!("Only + and - operator can be emitted for now."),
                 }
             }
             _ => bail!("Invalid argument. emit_list only accepts AST::List"),
@@ -140,6 +156,7 @@ impl<'a, W: Write> Emitter<'a, W> {
                 let val = literal
                     .parse::<i32>()
                     .with_context(|| "Failed to parse number")?;
+                writer.write(&[OpCode::I32Const as u8])?;
                 encode_s_leb128(writer, val)?;
             }
             AST::Symbol(name) => match env.get(name) {
@@ -207,7 +224,9 @@ impl<'a, W: Write> Emitter<'a, W> {
             func_body.push(0x00); // local decl count
 
             for form in forms {
+                println!("emitting form {:?}", form);
                 self.emit_obj(&mut func_body, &form, &mut new_env)?;
+                dbg!(&func_body);
             }
             func_body.push(OpCode::End as u8);
 
@@ -316,14 +335,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_add() {
+    fn test_bin_ops() {
         let mut buf = Vec::new();
         let mut emitter = Emitter::new(&mut buf);
         emitter
             .emit(
-                "(defn addTwo : i32
+                "(defn calc : i32
                                 (a : i32 b : i32)
-                                 (+ a b))",
+                                 (+ a (- b 1)))",
             )
             .unwrap();
         assert_eq!(
@@ -348,12 +367,14 @@ mod tests {
                 0x01, // section size,
                 0x00, // num exports
                 0x0A, // code section
-                0x09, // section size
+                0x0C, // section size
                 0x01, // num functions
-                0x07, // func body size
+                0x0A, // func body size
                 0x00, // local decl count
                 0x20, 0x00, // local.get 0
                 0x20, 0x01, // local.get 1,
+                0x41, 0x01, // i32.const 1
+                0x6B, // i32.sub
                 0x6A, // i32.add
                 0x0B, // END
             ]
