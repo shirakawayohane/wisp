@@ -11,7 +11,7 @@ pub enum Token<'a> {
     Colon,
 }
 
-const SPECIAL_CHARS: &'static [char] = &['(', ')', ':'];
+const SPECIAL_CHARS: &'static [char] = &['(', ')', ':', ','];
 
 pub fn tokenize(source: &str) -> Result<Vec<Token>> {
     let mut ret = Vec::new();
@@ -24,7 +24,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>> {
                     src = &src[1..];
                     continue;
                 }
-                ' ' | '\t' => {
+                ' ' | '\t' | ',' => {
                     src = &src[1..];
                     continue;
                 }

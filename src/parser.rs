@@ -4,6 +4,7 @@ use anyhow::{anyhow, bail, Context, Result};
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeAST {
     I32,
+    F32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -20,6 +21,7 @@ pub enum AST<'a> {
 fn parse_type(tokens: &mut Vec<Token>) -> Result<TypeAST> {
     Ok(match tokens.pop() {
         Some(Token::Symbol("i32")) => TypeAST::I32,
+        Some(Token::Symbol("f32")) => TypeAST::F32,
         _ => todo!(),
     })
 }
@@ -86,24 +88,24 @@ mod tests {
     #[test]
     fn test_bin_ops() {
         let ast = parse(
-            "(defn calc : i32
-                      (a : i32 b : i32)
-                        (+ a (- b 1)))",
+            "(defn calc : f32
+                      (a : f32 b : i32)
+                        (+ a (- b 1.0)))",
         )
             .unwrap();
         assert_eq!(
             ast,
             AST::Module(vec![AST::List(vec![
                 AST::Symbol("defn"),
-                AST::SymbolWithAnnotation("calc", TypeAST::I32),
+                AST::SymbolWithAnnotation("calc", TypeAST::F32),
                 AST::List(vec![
-                    AST::SymbolWithAnnotation("a", TypeAST::I32),
+                    AST::SymbolWithAnnotation("a", TypeAST::F32),
                     AST::SymbolWithAnnotation("b", TypeAST::I32),
                 ]),
                 AST::List(vec![AST::Add, AST::Symbol("a"),
                                AST::List(vec![
                                    AST::Sub,
                                    AST::Symbol("b"),
-                                   AST::NumberLiteral("1")])])])]))
+                                   AST::NumberLiteral("1.0")])])])]))
     }
 }

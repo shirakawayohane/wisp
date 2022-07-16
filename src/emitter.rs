@@ -1,10 +1,10 @@
 use crate::{
     encoder::{encode_leb128, encode_s_leb128, encode_string},
-    env::{Env, Pointer},
+    env::{Env, Pointer, Variable},
     parser::{parse, AST},
-    resolver::{dissolve_type, resolve_type, TypeEnv},
+    resolver::{dissolve_type, resolve_type, Type, TypeEnv},
 };
-use anyhow::{anyhow, bail, ensure, Context, Result};
+use anyhow::{anyhow, bail, ensure, Result};
 use std::{collections::HashMap, hash::Hash, io::Write, rc::Rc};
 
 enum SectionCode {
@@ -25,6 +25,7 @@ struct Sections {
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub enum PrimitiveType {
     I32 = 0x7f,
+    F32 = 0x6f,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
@@ -49,8 +50,12 @@ enum OpCode {
     End = 0x0b,
     LocalGet = 0x20,
     I32Const = 0x41,
+    F32Const = 0x43,
     I32Add = 0x6a,
     I32Sub = 0x6b,
+    F32Add = 0x92,
+    F32Sub = 0x93,
+    F32ConvertI32S = 0xB2,
 }
 
 fn emit_signature<W: Write>(writer: &mut W, signature: &Signature) -> Result<()> {
@@ -89,7 +94,7 @@ pub struct Emitter<'a, W: Write> {
 
 enum BinOp {
     Add,
-    Sub
+    Sub,
 }
 
 impl<'a, W: Write> Emitter<'a, W> {
@@ -114,63 +119,118 @@ impl<'a, W: Write> Emitter<'a, W> {
         lhs: &AST,
         rhs: &AST,
         env: &mut Env,
-    ) -> Result<()> {
-        self.emit_obj(writer, lhs, env)?;
-        self.emit_obj(writer, rhs, env)?;
-        // ToDo: Change binop according to lhs and rhs type.
-        let opcode = match op {
-            BinOp::Add => OpCode::I32Add,
-            BinOp::Sub => OpCode::I32Sub,
+    ) -> Result<Type> {
+        let mut lhs_temp_vec = Vec::new();
+        let mut rhs_temp_vec = Vec::new();
+        let lhs_type = self.emit_obj(&mut lhs_temp_vec, lhs, env)?;
+        let rhs_type = self.emit_obj(&mut rhs_temp_vec, rhs, env)?;
+        let (opcode, result_type) = match op {
+            BinOp::Add => match *lhs_type {
+                Type::I32 => match *rhs_type {
+                    Type::F32 => {
+                        // cast lhs to f32
+                        lhs_temp_vec.push(OpCode::F32ConvertI32S as u8);
+                        (OpCode::F32Add, Type::F32)
+                    }
+                    Type::I32 => (OpCode::I32Add, Type::I32),
+                },
+                Type::F32 => match *rhs_type {
+                    Type::I32 => {
+                        println!("キャストはいりました　");
+                        // cast rhs to f32
+                        rhs_temp_vec.push(OpCode::F32ConvertI32S as u8);
+                        (OpCode::F32Add, Type::F32)
+                    }
+                    Type::F32 => (OpCode::F32Add, Type::F32),
+                },
+            },
+            BinOp::Sub => match *lhs_type {
+                Type::I32 => match *rhs_type {
+                    Type::F32 => {
+                        // cast lhs to f32
+                        lhs_temp_vec.push(OpCode::F32ConvertI32S as u8);
+                        (OpCode::F32Sub, Type::F32)
+                    }
+                    Type::I32 => (OpCode::I32Sub, Type::I32),
+                },
+                Type::F32 => match *rhs_type {
+                    Type::I32 => {
+                        // cast rhs to f32
+                        rhs_temp_vec.push(OpCode::F32ConvertI32S as u8);
+                        (OpCode::F32Sub, Type::F32)
+                    }
+                    Type::F32 => (OpCode::F32Sub, Type::F32),
+                },
+            },
         };
+        writer.write(&lhs_temp_vec)?;
+        writer.write(&rhs_temp_vec)?;
         writer.write(&[opcode as u8])?;
-        Ok(())
+        Ok(result_type)
     }
-    fn emit_list<W2: Write>(&mut self, writer: &mut W2, ast: &AST, env: &mut Env) -> Result<()> {
+    fn emit_list<W2: Write>(
+        &mut self,
+        writer: &mut W2,
+        ast: &AST,
+        env: &mut Env,
+    ) -> Result<Rc<Type>> {
         match ast {
             AST::List(list) => {
                 ensure!(
                     list.len() == 3,
                     "Binary op can only be evaluated with 2 args"
                 );
-                match &list[0] {
+                Ok(match &list[0] {
                     AST::Add => {
-                        self.emit_bin_exp(writer, BinOp::Add, &list[1], &list[2], env)?;
-                    },
+                        let result_type =
+                            self.emit_bin_exp(writer, BinOp::Add, &list[1], &list[2], env)?;
+                        Rc::new(result_type)
+                    }
                     AST::Sub => {
-                        self.emit_bin_exp(writer, BinOp::Sub, &list[1], &list[2], env)?;
-                    },
+                        let result_type =
+                            self.emit_bin_exp(writer, BinOp::Sub, &list[1], &list[2], env)?;
+                        Rc::new(result_type)
+                    }
                     _ => todo!("Only + and - operator can be emitted for now."),
-                }
+                })
             }
             _ => bail!("Invalid argument. emit_list only accepts AST::List"),
         }
-        Ok(())
     }
-    fn emit_obj<W2: Write>(&mut self, writer: &mut W2, ast: &AST, env: &mut Env) -> Result<()> {
+    fn emit_obj<W2: Write>(
+        &mut self,
+        writer: &mut W2,
+        ast: &AST,
+        env: &mut Env,
+    ) -> Result<Rc<Type>> {
         match ast {
-            AST::List(_) => {
-                self.emit_list(writer, ast, env)?;
-            }
+            AST::List(_) => return self.emit_list(writer, ast, env),
             // TODO: Infer type
             AST::NumberLiteral(literal) => {
-                let val = literal
-                    .parse::<i32>()
-                    .with_context(|| "Failed to parse number")?;
-                writer.write(&[OpCode::I32Const as u8])?;
-                encode_s_leb128(writer, val)?;
+                if let Ok(i32_val) = literal.parse::<i32>() {
+                    writer.write(&[OpCode::I32Const as u8])?;
+                    encode_s_leb128(writer, i32_val)?;
+                    return Ok(Rc::new(Type::I32));
+                } else if let Ok(f32_val) = literal.parse::<f32>() {
+                    writer.write(&[OpCode::F32Const as u8])?;
+                    writer.write(&f32_val.to_le_bytes())?;
+                    return Ok(Rc::new(Type::F32));
+                } else {
+                    bail!("Failed to parse number");
+                }
             }
             AST::Symbol(name) => match env.get(name) {
                 None => bail!("Symbol {} not found in this scope", name),
-                Some(pointer) => match pointer {
+                Some(variable) => match variable.pointer {
                     Pointer::Local(index) => {
                         writer.write(&[OpCode::LocalGet as u8])?;
                         encode_leb128(writer, index)?;
+                        return Ok(variable.t.clone());
                     }
                 },
             },
             _ => todo!(),
         }
-        Ok(())
     }
     fn emit_func(&mut self, ast: &AST, env: Rc<Env>) -> Result<()> {
         if let AST::List(func_list) = ast {
@@ -193,14 +253,15 @@ impl<'a, W: Write> Emitter<'a, W> {
                         AST::SymbolWithAnnotation(s, type_ast) => (*s, type_ast),
                         _ => bail!("A symbol with type annotaion is expected after 'defn'"),
                     };
-                    dbg!(&slice[1]);
                     let mut args = Vec::new();
                     match &slice[1] {
                         AST::List(list) => {
                             for arg in list {
                                 args.push(match arg {
                                     AST::SymbolWithAnnotation(name, type_ast) => (*name, type_ast),
-                                    _ => bail!("Function argument should be a symbol annotated with ':'")
+                                    _ => bail!(
+                                        "Function argument should be a symbol annotated with ':'"
+                                    ),
                                 });
                             }
                         }
@@ -211,12 +272,22 @@ impl<'a, W: Write> Emitter<'a, W> {
                 }
                 _ => todo!(),
             };
+
+            // TODO: Impl type symbol functionality
+            let empty_type_env = TypeEnv::default();
+
             let func_index = self.function_names.len();
             self.function_names.push(name.to_string());
             let mut new_env = Env::extend(env.clone());
             let mut local_index = 0;
             for arg in &args {
-                new_env.set(arg.0, Pointer::Local(local_index));
+                new_env.set(
+                    arg.0,
+                    Variable {
+                        pointer: Pointer::Local(local_index),
+                        t: Rc::new(resolve_type(arg.1, &empty_type_env)),
+                    },
+                );
                 local_index += 1;
             }
             // TODO: local variables
@@ -224,14 +295,10 @@ impl<'a, W: Write> Emitter<'a, W> {
             func_body.push(0x00); // local decl count
 
             for form in forms {
-                println!("emitting form {:?}", form);
                 self.emit_obj(&mut func_body, &form, &mut new_env)?;
-                dbg!(&func_body);
             }
             func_body.push(OpCode::End as u8);
 
-            // TODO: Impl type symbol functionality
-            let empty_type_env = TypeEnv::default();
             let signature = Signature {
                 sig_type: SignatureType::Func,
                 params: args
@@ -286,7 +353,6 @@ impl<'a, W: Write> Emitter<'a, W> {
         // Emit type section
         writer.write(&[SectionCode::Type as u8])?;
         let num_types = self.type_signatures.len();
-        dbg!(num_types);
         let mut num_types_bytes = Vec::new();
         encode_leb128(&mut num_types_bytes, num_types as u64)?;
         let type_section_size = self.sections.type_section.len() + num_types_bytes.len();
@@ -297,7 +363,6 @@ impl<'a, W: Write> Emitter<'a, W> {
         // Emit function section
         writer.write(&[SectionCode::Function as u8])?;
         let num_functions = self.function_names.len();
-        dbg!(num_functions);
         let mut num_funcs_bytes = Vec::new();
         encode_leb128(&mut num_funcs_bytes, num_functions as u8)?;
         let func_section_size = num_funcs_bytes.len() + self.sections.func_section.len();
@@ -340,9 +405,57 @@ mod tests {
         let mut emitter = Emitter::new(&mut buf);
         emitter
             .emit(
-                "(defn calc : i32
-                                (a : i32 b : i32)
+                "(defn calc : f32
+                                (a : f32 b : i32)
                                  (+ a (- b 1)))",
+            )
+            .unwrap();
+        assert_eq!(
+            buf,
+            vec![
+                0x00, 0x61, 0x73, 0x6d, // wasm header
+                0x01, 0x00, 0x00, 0x00, // wasm binary version
+                0x01, // type section
+                0x07, // section size
+                0x01, // num types
+                0x60, // type:d func
+                0x02, // num params
+                0x6F, // f32
+                0x7F, // i32
+                0x01, // num results
+                0x6F, // f32
+                0x03, // function section
+                0x02, // section size
+                0x01, // num funcs
+                0x00, // signature index
+                0x07, // export section
+                0x01, // section size,
+                0x00, // num exports
+                0x0A, // code section
+                0x0D, // section size
+                0x01, // num functions
+                0x0B, // func body size
+                0x00, // local decl count
+                0x20, 0x00, // local.get 0
+                0x20, 0x01, // local.get 1,
+                0x41, 0x01, // i32.const 1
+                0x6B, // i32.sub
+                0xB2, // f32_convert_i32_s
+                0x92, // f32.add
+                0x0B, // END
+            ]
+        );
+    }
+
+    #[test]
+    fn calc_f32() {
+        let mut buf = Vec::new();
+        let mut emitter = Emitter::new(&mut buf);
+        emitter
+            .emit(
+                "(defn calc: f32
+                                (a: f32 b: f32)
+                                    (- (+ a b) 1.0))",
             )
             .unwrap();
         assert_eq!(
@@ -355,10 +468,10 @@ mod tests {
                 0x01, // num types
                 0x60, // type: func
                 0x02, // num params
-                0x7F, // i32
-                0x7F, // i32
+                0x6F, // f32
+                0x6F, // f32
                 0x01, // num results
-                0x7F, // i32
+                0x6F, // f32
                 0x03, // function section
                 0x02, // section size
                 0x01, // num funcs
@@ -367,15 +480,15 @@ mod tests {
                 0x01, // section size,
                 0x00, // num exports
                 0x0A, // code section
-                0x0C, // section size
+                0x0F, // section size
                 0x01, // num functions
-                0x0A, // func body size
+                0x0D, // func body size
                 0x00, // local decl count
                 0x20, 0x00, // local.get 0
                 0x20, 0x01, // local.get 1,
-                0x41, 0x01, // i32.const 1
-                0x6B, // i32.sub
-                0x6A, // i32.add
+                0x92, // f32.add
+                0x43, 0x00, 0x00, 0x80, 0x3f, // f32.const 1.0
+                0x93, // f32.sub
                 0x0B, // END
             ]
         );
@@ -385,9 +498,13 @@ mod tests {
     fn test_export() {
         let mut buf = Vec::new();
         let mut emitter = Emitter::new(&mut buf);
-        emitter.emit("(export defn addTwo : i32 \
+        emitter
+            .emit(
+                "(export defn addTwo : i32 \
                                 (a : i32 b: i32)\
-                                    (+ a b))").unwrap();
+                                    (+ a b))",
+            )
+            .unwrap();
         assert_eq!(
             buf,
             vec![
