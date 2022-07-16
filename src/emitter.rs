@@ -2,9 +2,10 @@ use crate::{
     encoder::{encode_leb128, encode_s_leb128, encode_string},
     env::{Env, Pointer},
     parser::{parse, AST},
+    resolver::{dissolve_type, resolve_type, TypeEnv},
 };
 use anyhow::{anyhow, bail, ensure, Context, Result};
-use std::{collections::HashMap, io::Write, rc::Rc, vec};
+use std::{collections::HashMap, hash::Hash, io::Write, rc::Rc};
 
 enum SectionCode {
     Type = 0x01,
@@ -26,14 +27,14 @@ pub enum PrimitiveType {
     I32 = 0x7f,
 }
 
-#[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
-enum SignatureType {
-    Func = 0x60,
-}
-
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 enum ExportKind {
     Func = 0x00,
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
+enum SignatureType {
+    Func = 0x60,
 }
 
 #[derive(PartialEq, Eq, Debug, Hash, Clone)]
@@ -49,8 +50,6 @@ enum OpCode {
     End = 0x0b,
     LocalGet = 0x20,
 }
-
-const DEFN_KEYWORD: &str = "defn";
 
 fn emit_signature<W: Write>(writer: &mut W, signature: &Signature) -> Result<()> {
     // signature type
@@ -159,11 +158,11 @@ impl<'a, W: Write> Emitter<'a, W> {
     fn emit_func(&mut self, ast: &AST, env: Rc<Env>) -> Result<()> {
         if let AST::List(func_list) = ast {
             let mut slice = &func_list[..];
-            let (is_export, name, args, forms) = match func_list[0] {
+            let (is_export, name, result_type_ast, args, forms) = match func_list[0] {
                 AST::Symbol(s) => {
                     let is_export = if s == "export" {
                         ensure!(
-                            slice[1] == AST::Symbol(DEFN_KEYWORD),
+                            slice[1] == AST::Symbol("defn"),
                             "Failed to compile function. 'defn' is expected after 'export'"
                         );
                         slice = &slice[2..];
@@ -173,24 +172,25 @@ impl<'a, W: Write> Emitter<'a, W> {
                         slice = &slice[1..];
                         false
                     };
-                    let name = match &slice[0] {
-                        AST::Symbol(s) => s,
-                        _ => bail!("A symbol is expected after 'defn'"),
+                    let (name, type_ast) = match &slice[0] {
+                        AST::SymbolWithAnnotation(s, type_ast) => (*s, type_ast),
+                        _ => bail!("A symbol with type annotaion is expected after 'defn'"),
                     };
+                    dbg!(&slice[1]);
                     let mut args = Vec::new();
                     match &slice[1] {
                         AST::List(list) => {
                             for arg in list {
                                 args.push(match arg {
-                                    AST::Symbol(name) => name,
-                                    _ => todo!(),
+                                    AST::SymbolWithAnnotation(name, type_ast) => (*name, type_ast),
+                                    _ => bail!("Function argument should be a symbol annotated with ':'")
                                 });
                             }
                         }
                         _ => bail!("Function args list is required after 'defn'"),
                     };
                     let forms = Vec::from(&slice[2..]);
-                    (is_export, name, args, forms)
+                    (is_export, name, type_ast, args, forms)
                 }
                 _ => todo!(),
             };
@@ -199,7 +199,7 @@ impl<'a, W: Write> Emitter<'a, W> {
             let mut new_env = Env::extend(env.clone());
             let mut local_index = 0;
             for arg in &args {
-                new_env.set(arg, Pointer::Local(local_index));
+                new_env.set(arg.0, Pointer::Local(local_index));
                 local_index += 1;
             }
             // TODO: local variables
@@ -211,12 +211,17 @@ impl<'a, W: Write> Emitter<'a, W> {
             }
             func_body.push(OpCode::End as u8);
 
+            // TODO: Impl type symbol functionality
+            let empty_type_env = TypeEnv::default();
             let signature = Signature {
                 sig_type: SignatureType::Func,
-                // TODO: param can only be I32 for now.
-                params: args.iter().map(|_| PrimitiveType::I32).collect::<Vec<_>>(),
-                // TODO: result can only be single I32 for now.
-                results: vec![PrimitiveType::I32],
+                params: args
+                    .iter()
+                    .flat_map(|(_, type_ast)| {
+                        dissolve_type(resolve_type(type_ast, &empty_type_env))
+                    })
+                    .collect::<Vec<_>>(),
+                results: dissolve_type(resolve_type(result_type_ast, &empty_type_env)),
             };
             let signature_index = match self.type_signatures.get(&signature) {
                 Some(index) => *index,
@@ -309,13 +314,18 @@ impl<'a, W: Write> Emitter<'a, W> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_add() {
         let mut buf = Vec::new();
         let mut emitter = Emitter::new(&mut buf);
-        emitter.emit("(defn addTwo : i32
+        emitter
+            .emit(
+                "(defn addTwo : i32
                                 (a : i32 b : i32)
-                                 (+ a b))").unwrap();
+                                 (+ a b))",
+            )
+            .unwrap();
         assert_eq!(
             buf,
             vec![
@@ -349,11 +359,14 @@ mod tests {
             ]
         );
     }
+
     #[test]
     fn test_export() {
         let mut buf = Vec::new();
         let mut emitter = Emitter::new(&mut buf);
-        emitter.emit("(export defn addTwo (a b) (+ a b))").unwrap();
+        emitter.emit("(export defn addTwo : i32 \
+                                (a : i32 b: i32)\
+                                    (+ a b))").unwrap();
         assert_eq!(
             buf,
             vec![

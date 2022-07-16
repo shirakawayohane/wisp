@@ -7,6 +7,7 @@ mod emitter;
 mod lexer;
 mod parser;
 mod env;
+mod resolver;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
