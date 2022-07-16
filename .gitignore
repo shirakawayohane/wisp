@@ -1,3 +1,5 @@
 /target
 .idea
 .vscode
+sample.wasm
+sample.wisp
