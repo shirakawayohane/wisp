@@ -1,3 +1,5 @@
+use std::fmt::{Display};
+
 use anyhow::Result;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -10,10 +12,30 @@ pub enum Token<'a> {
     Slash,
     LParen,
     RParen,
+    LBracket,
+    RBracket,
     Colon,
 }
 
-const SPECIAL_CHARS: &'static [char] = &['(', ')', ':', ','];
+impl<'a> Display for Token<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Token::Symbol(s) => write!(f, "{}", s),
+            Token::NumberLiteral(s) => write!(f, "{}", s),
+            Token::Plus => write!(f, "+"),
+            Token::Minus => write!(f, "-"),
+            Token::Asterisk => write!(f, "*"),
+            Token::Slash => write!(f, "/"),
+            Token::LParen => write!(f, "("),
+            Token::RParen => write!(f, ")"),
+            Token::LBracket => write!(f, "["),
+            Token::RBracket => write!(f, "]"),
+            Token::Colon => write!(f, ":")
+        }
+    }
+}
+
+const SPECIAL_CHARS: &'static [char] = &['(', ')', ':', ',', '[', ']'];
 
 pub fn tokenize(source: &str) -> Result<Vec<Token>> {
     let mut ret = Vec::new();
@@ -32,6 +54,8 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>> {
                 }
                 '(' => Token::LParen,
                 ')' => Token::RParen,
+                '[' => Token::LBracket,
+                ']' => Token::RBracket,
                 '+' => Token::Plus,
                 '-' => Token::Minus,
                 '*' => Token::Asterisk,

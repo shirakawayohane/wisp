@@ -199,7 +199,7 @@ mod tests {
             compile_into_wasm(
                 &mut writer,
                 "(defn calc : f32
-                (a : f32 b : i32)
+                [a : f32 b : i32]
                   (* 10 (/ (+ a (- b 1)) 2))",
             )
             .unwrap();

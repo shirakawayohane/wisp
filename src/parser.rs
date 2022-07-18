@@ -1,5 +1,5 @@
 use crate::lexer::{tokenize, Token};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result, ensure};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeAST {
@@ -19,6 +19,7 @@ pub enum AST<'a> {
     Mul,
     Div,
     List(Vec<AST<'a>>),
+    Vector(Vec<AST<'a>>),
 }
 
 fn parse_type(tokens: &mut Vec<Token>) -> Result<TypeAST> {
@@ -29,24 +30,16 @@ fn parse_type(tokens: &mut Vec<Token>) -> Result<TypeAST> {
     })
 }
 
-fn parse_list<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
-    let token = tokens.pop();
-    if token != Some(Token::LParen) {
-        return Err(anyhow!(
-            "List must be start with LParen, but found {:?}",
-            token
-        ));
-    }
-    let mut list = Vec::new();
-    while !tokens.is_empty() {
-        let token = match tokens.pop() {
-            None => bail!("Did not find enough tokens"),
-            Some(t) => t,
-        };
-        list.push(match token {
+pub fn parse<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
+    let first_token = tokens.pop().with_context(|| "Parse error. Not enough tokens")?;
+    Ok(match first_token {
             Token::LParen => {
                 tokens.push(Token::LParen);
                 parse_list(tokens)?
+            },
+            Token::LBracket => {
+                tokens.push(Token::LBracket);
+                parse_vector(tokens)?
             }
             Token::NumberLiteral(val) => AST::NumberLiteral(val),
             Token::Plus => AST::Add,
@@ -60,18 +53,44 @@ fn parse_list<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
                 } else {
                     AST::Symbol(name)
                 }
-            }
-            Token::RParen => return Ok(AST::List(list)),
+            },
+            Token::RParen => unreachable!(),
+            Token::RBracket => unreachable!(),
             Token::Colon => unreachable!("Colon should be processed in Symbol arm"),
-        });
+    })
+}
+
+fn parse_sorrounded_by<'a>(
+    tokens: &mut Vec<Token<'a>>,
+    open: Token,
+    close: Token,
+) -> Result<Vec<AST<'a>>> {
+    ensure!(tokens.len() > 0, "Parse error. Not enough tokens");
+    ensure!(tokens.last().unwrap() == &open, "Expected {} {}", open, tokens.last().unwrap());
+    tokens.pop();
+    let mut nodes = Vec::new();
+    while let Some(token) = tokens.last() {
+        if *token == close {
+            tokens.pop();
+            break;
+        }
+        let node = parse(tokens)?;
+        nodes.push(node);
     }
-    Ok(AST::List(list))
+    Result::Ok(nodes)
+}
+
+fn parse_vector<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
+    Ok(AST::Vector(parse_sorrounded_by(tokens, Token::LBracket, Token::RBracket)?))
+}
+
+fn parse_list<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
+    Ok(AST::List(parse_sorrounded_by(tokens, Token::LParen, Token::RParen)?))
 }
 
 fn parse_module<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
     let mut lists = Vec::new();
     while !tokens.is_empty() {
-        dbg!(&tokens.last());
         if tokens.last() != Some(&Token::LParen) {
             return Err(anyhow!("Toplevel forms must be a list."));
         }
@@ -80,7 +99,7 @@ fn parse_module<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
     Ok(AST::Module(lists))
 }
 
-pub fn parse(source: &str) -> Result<AST> {
+pub fn parse_source(source: &str) -> Result<AST> {
     let mut tokens = tokenize(source).with_context(|| format!("tokenize error"))?;
     tokens.reverse();
     parse_module(&mut tokens)
@@ -92,10 +111,10 @@ mod tests {
 
     #[test]
     fn test_bin_ops() {
-        let ast = parse(
+        let ast = parse_source(
             "(defn calc : f32
-                      (a : f32 b : i32)
-                      (* 3.14 (/ (+ a (- b 1)) 2)))",
+                [a : f32, b : i32]
+                    (* 3.14 (/ (+ a (- b 1)) 2)))",
         )
         .unwrap();
         assert_eq!(
@@ -103,7 +122,7 @@ mod tests {
             AST::Module(vec![AST::List(vec![
                 AST::Symbol("defn"),
                 AST::SymbolWithAnnotation("calc", TypeAST::F32),
-                AST::List(vec![
+                AST::Vector(vec![
                     AST::SymbolWithAnnotation("a", TypeAST::F32),
                     AST::SymbolWithAnnotation("b", TypeAST::I32),
                 ]),

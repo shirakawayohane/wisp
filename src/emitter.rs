@@ -1,6 +1,6 @@
 use crate::{
     env::{Env, Pointer, Variable},
-    parser::{parse, AST, TypeAST},
+    parser::{parse_source, AST, TypeAST},
     resolver::{dissolve_type, resolve_type, Type, TypeEnv},
 };
 use anyhow::{anyhow, bail, ensure, Result, Context};
@@ -273,10 +273,17 @@ impl<'a> Emitter<'a> {
                         _ => bail!("- must be called with one or two arguments"),
                     },
                     AST::Symbol(name) => {
-                        let module_functions = self.module.functions.clone();
-                        let module_func_refmut = module_functions.borrow_mut();
-                        let (index, func) = module_func_refmut.get(*name).with_context(|| format!("Unable to find function {:?}", &name))?;
-                        self.emit_function_call(codes, *index as u32, func, &list[1..], env)?
+                        match *name {
+                            "let" => {
+                                todo!()
+                            }
+                            _ => { // emit function call
+                                let module_functions = self.module.functions.clone();
+                                let module_func_refmut = module_functions.borrow_mut();
+                                let (index, func) = module_func_refmut.get(*name).with_context(|| format!("Unable to find function {:?}", &name))?;
+                                self.emit_function_call(codes, *index as u32, func, &list[1..], env)?
+                            }
+                        }
                     }
                     _ => todo!(
                         "Only [+, -, *, /] operators and function call can be emitted for now."
@@ -337,7 +344,7 @@ impl<'a> Emitter<'a> {
                     };
                     let mut args = Vec::new();
                     match &slice[1] {
-                        AST::List(list) => {
+                        AST::Vector(list) => {
                             for arg in list {
                                 args.push(match arg {
                                     AST::SymbolWithAnnotation(name, type_ast) => (*name, type_ast),
@@ -347,7 +354,7 @@ impl<'a> Emitter<'a> {
                                 });
                             }
                         }
-                        _ => bail!("Function args list is required after 'defn'"),
+                        _ => bail!("Function args vector is required after 'defn'"),
                     };
                     let forms = Vec::from(&slice[2..]);
                     (is_export, name, type_ast, args, forms)
@@ -466,7 +473,7 @@ impl<'a> Emitter<'a> {
         Ok(())
     }
     pub fn emit(&mut self, source: &str) -> Result<()> {
-        let module_ast = parse(source)?;
+        let module_ast = parse_source(source)?;
         self.emit_module(&module_ast)
     }
 }
@@ -482,7 +489,7 @@ mod tests {
         emitter
             .emit(
                 "(defn calc : f32
-                            (a : f32 b : i32)
+                            [a : f32 b : i32]
                                 (* 10 (/ (+ a (- b 1)) 2)))",
             )
             .unwrap();
@@ -529,10 +536,10 @@ mod tests {
         emitter
             .emit(
                 "(defn neg_f32: f32
-                            (n: f32)
+                            [n: f32]
                                 (- n))
                         (defn neg_i32: i32
-                            (n: i32)
+                            [n: i32]
                                 (- n))",
             )
             .unwrap();
@@ -564,7 +571,7 @@ mod tests {
         emitter
             .emit(
                 "(export defn addTwo : i32
-                    (a : i32 b: i32)
+                    [a : i32 b: i32]
                         (+ a b))",
             )
             .unwrap();
@@ -582,8 +589,8 @@ mod tests {
         let mut module = Module::default();
         let mut emitter = Emitter::new(&mut module);
         emitter.emit("
-            (defn addTwo (a: i32, b: i32) (+ a b) )
-            (export defn main () (addTwo 10 20))
+            (defn addTwo [a: i32, b: i32] (+ a b) )
+            (export defn main [] (addTwo 10 20))
         ").unwrap();
         let module_functions = module.functions.borrow_mut();
         assert_eq!(
