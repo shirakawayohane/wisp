@@ -15,6 +15,8 @@ pub enum AST<'a> {
     SymbolWithAnnotation(&'a str, TypeAST),
     Add,
     Sub,
+    Mul,
+    Div,
     List(Vec<AST<'a>>),
 }
 
@@ -46,8 +48,10 @@ fn parse_list<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
                 parse_list(tokens)?
             }
             Token::NumberLiteral(val) => AST::NumberLiteral(val),
-            Token::Add => AST::Add,
-            Token::Sub => AST::Sub,
+            Token::Plus => AST::Add,
+            Token::Minus => AST::Sub,
+            Token::Asterisk => AST::Mul,
+            Token::Slash => AST::Div,
             Token::Symbol(name) => {
                 if let Some(Token::Colon) = tokens.last() {
                     tokens.pop();
@@ -90,9 +94,9 @@ mod tests {
         let ast = parse(
             "(defn calc : f32
                       (a : f32 b : i32)
-                        (+ a (- b 1.0)))",
+                      (* 3.14 (/ (+ a (- b 1)) 2)))",
         )
-            .unwrap();
+        .unwrap();
         assert_eq!(
             ast,
             AST::Module(vec![AST::List(vec![
@@ -102,10 +106,20 @@ mod tests {
                     AST::SymbolWithAnnotation("a", TypeAST::F32),
                     AST::SymbolWithAnnotation("b", TypeAST::I32),
                 ]),
-                AST::List(vec![AST::Add, AST::Symbol("a"),
-                               AST::List(vec![
-                                   AST::Sub,
-                                   AST::Symbol("b"),
-                                   AST::NumberLiteral("1.0")])])])]))
+                AST::List(vec![
+                    AST::Mul,
+                    AST::NumberLiteral("3.14"),
+                    AST::List(vec![
+                        AST::Div,
+                        AST::List(vec![
+                            AST::Add,
+                            AST::Symbol("a"),
+                            AST::List(vec![AST::Sub, AST::Symbol("b"), AST::NumberLiteral("1")])
+                        ]),
+                        AST::NumberLiteral("2")
+                    ])
+                ])
+            ])])
+        )
     }
 }

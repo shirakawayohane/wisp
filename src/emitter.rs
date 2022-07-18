@@ -52,8 +52,13 @@ pub enum OpCode {
     F32Const(f32),
     I32Add,
     I32Sub,
+    I32Mul,
+    I32Div,
     F32Add,
     F32Sub,
+    F32Mul,
+    F32Div,
+    F32Neg,
     F32ConvertI32S,
 }
 
@@ -71,11 +76,42 @@ pub struct Emitter<'a> {
 enum BinOp {
     Add,
     Sub,
+    Mul,
+    Div,
+}
+
+enum UnaryOp {
+    Minus,
 }
 
 impl<'a> Emitter<'a> {
     pub fn new(module: &'a mut Module) -> Self {
         Emitter { module }
+    }
+    fn emit_unary_exp(
+        &mut self,
+        codes: &mut Vec<OpCode>,
+        op: UnaryOp,
+        operand: &AST,
+        env: &mut Env,
+    ) -> Result<Type> {
+        let mut temp_vec = Vec::new();
+        let t = self.emit_obj(&mut temp_vec, operand, env)?;
+        match op {
+            UnaryOp::Minus => match *t {
+                Type::F32 => {
+                    temp_vec.push(OpCode::F32Neg);
+                    codes.append(&mut temp_vec);
+                    Ok(Type::F32)
+                }
+                Type::I32 => {
+                    codes.push(OpCode::I32Const(0));
+                    codes.append(&mut temp_vec);
+                    codes.push(OpCode::I32Sub);
+                    Ok(Type::I32)
+                }
+            },
+        }
     }
     fn emit_bin_exp(
         &mut self,
@@ -126,6 +162,40 @@ impl<'a> Emitter<'a> {
                     Type::F32 => (OpCode::F32Sub, Type::F32),
                 },
             },
+            BinOp::Mul => match *lhs_type {
+                Type::I32 => match *rhs_type {
+                    Type::F32 => {
+                        // cast lhs to f32
+                        lhs_temp_vec.push(OpCode::F32ConvertI32S);
+                        (OpCode::F32Mul, Type::F32)
+                    }
+                    Type::I32 => (OpCode::I32Mul, Type::I32),
+                },
+                Type::F32 => match *rhs_type {
+                    Type::F32 => (OpCode::F32Mul, Type::F32),
+                    Type::I32 => {
+                        rhs_temp_vec.push(OpCode::F32ConvertI32S);
+                        (OpCode::F32Mul, Type::F32)
+                    }
+                },
+            },
+            BinOp::Div => match *lhs_type {
+                Type::I32 => match *rhs_type {
+                    Type::F32 => {
+                        // cast lhs to f32
+                        lhs_temp_vec.push(OpCode::F32ConvertI32S);
+                        (OpCode::F32Div, Type::F32)
+                    }
+                    Type::I32 => (OpCode::I32Div, Type::I32),
+                },
+                Type::F32 => match *rhs_type {
+                    Type::F32 => (OpCode::F32Div, Type::F32),
+                    Type::I32 => {
+                        rhs_temp_vec.push(OpCode::F32ConvertI32S);
+                        (OpCode::F32Div, Type::F32)
+                    }
+                },
+            },
         };
         codes.append(&mut lhs_temp_vec);
         codes.append(&mut rhs_temp_vec);
@@ -135,22 +205,44 @@ impl<'a> Emitter<'a> {
     fn emit_list(&mut self, codes: &mut Vec<OpCode>, ast: &AST, env: &mut Env) -> Result<Rc<Type>> {
         match ast {
             AST::List(list) => {
-                ensure!(
-                    list.len() == 3,
-                    "Binary op can only be evaluated with 2 args"
-                );
-                Ok(match &list[0] {
-                    AST::Add => {
-                        let result_type =
-                            self.emit_bin_exp(codes, BinOp::Add, &list[1], &list[2], env)?;
+                let first = &list[0];
+                Ok(match first {
+                    AST::Add | AST::Mul | AST::Div => {
+                        ensure!(
+                            list.len() == 3,
+                            "Binary op can only be evaluated with 2 args"
+                        );
+                        let result_type = self.emit_bin_exp(
+                            codes,
+                            match first {
+                                AST::Add => BinOp::Add,
+                                AST::Mul => BinOp::Mul,
+                                AST::Div => BinOp::Div,
+                                _ => unreachable!(),
+                            },
+                            &list[1],
+                            &list[2],
+                            env,
+                        )?;
                         Rc::new(result_type)
                     }
-                    AST::Sub => {
-                        let result_type =
-                            self.emit_bin_exp(codes, BinOp::Sub, &list[1], &list[2], env)?;
-                        Rc::new(result_type)
+                    AST::Sub => match &list.len() {
+                        2 => {
+                            let result_type =
+                                self.emit_unary_exp(codes, UnaryOp::Minus, &list[1], env)?;
+                            Rc::new(result_type)
+                        }
+                        3 => {
+                            let result_type =
+                                self.emit_bin_exp(codes, BinOp::Sub, &list[1], &list[2], env)?;
+                            Rc::new(result_type)
+                        }
+                        _ => bail!("- must be called with one or two arguments"),
+                    },
+                    AST::Symbol(_) => {
+                        todo!("Impl function call")
                     }
-                    _ => todo!("Only + and - operator can be emitted for now."),
+                    _ => todo!("Only [+, -, *, /] operators can be emitted for now."),
                 })
             }
             _ => bail!("Invalid argument. emit_list only accepts AST::List"),
@@ -318,8 +410,8 @@ mod tests {
         emitter
             .emit(
                 "(defn calc : f32
-                                (a : f32 b : i32)
-                                 (+ a (- b 1)))",
+                            (a : f32 b : i32)
+                                (* 10 (/ (+ a (- b 1)) 2)))",
             )
             .unwrap();
         assert_eq!(module.exports, []);
@@ -339,12 +431,60 @@ mod tests {
                 signature_index: 0,
                 body: vec![
                     OpCode::LocalDeclCount(0),
+                    OpCode::I32Const(10),
+                    OpCode::F32ConvertI32S,
                     OpCode::LocalGet(0),
                     OpCode::LocalGet(1),
                     OpCode::I32Const(1),
                     OpCode::I32Sub,
                     OpCode::F32ConvertI32S,
                     OpCode::F32Add,
+                    OpCode::I32Const(2),
+                    OpCode::F32ConvertI32S,
+                    OpCode::F32Div,
+                    OpCode::F32Mul,
+                    OpCode::End
+                ]
+            }
+        )
+    }
+    #[test]
+    fn test_unary_ops() {
+        let mut module: Module = Module::default();
+        let mut emitter = Emitter::new(&mut module);
+        emitter
+            .emit(
+                "(defn neg: f32
+                            (n: f32)
+                                (- n))
+                        (defn neg: i32
+                            (n: i32)
+                                (- n))",
+            )
+            .unwrap();
+        assert_eq!(
+            module.functions[0],
+            Function {
+                name: "neg".to_string(),
+                signature_index: 0,
+                body: vec![
+                    OpCode::LocalDeclCount(0),
+                    OpCode::LocalGet(0),
+                    OpCode::F32Neg,
+                    OpCode::End
+                ]
+            }
+        );
+        assert_eq!(
+            module.functions[1],
+            Function {
+                name: "neg".to_string(),
+                signature_index: 1,
+                body: vec![
+                    OpCode::LocalDeclCount(0),
+                    OpCode::I32Const(0),
+                    OpCode::LocalGet(0),
+                    OpCode::I32Sub,
                     OpCode::End
                 ]
             }
@@ -355,15 +495,19 @@ mod tests {
         let mut module: Module = Module::default();
         let mut emitter = Emitter::new(&mut module);
         emitter
-            .emit("(export defn addTwo : i32
+            .emit(
+                "(export defn addTwo : i32
                     (a : i32 b: i32)
                         (+ a b))",
             )
             .unwrap();
-        assert_eq!(module.exports, vec![Export {
-            export_type: ExportKind::Func,
-            func_index: 0,
-            name: "addTwo".to_string()
-        }])
+        assert_eq!(
+            module.exports,
+            vec![Export {
+                export_type: ExportKind::Func,
+                func_index: 0,
+                name: "addTwo".to_string()
+            }]
+        )
     }
 }

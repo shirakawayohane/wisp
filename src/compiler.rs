@@ -74,8 +74,13 @@ fn write_function_body(writer: &mut impl Write, func: &Function) -> Result<()> {
                     OpCode::End => 0x0B,
                     OpCode::I32Add => 0x6A,
                     OpCode::I32Sub => 0x6B,
+                    OpCode::I32Mul => 0x6C,
+                    OpCode::I32Div => 0x6D,
+                    OpCode::F32Neg => 0x8C,
                     OpCode::F32Add => 0x92,
                     OpCode::F32Sub => 0x93,
+                    OpCode::F32Mul => 0x94,
+                    OpCode::F32Div => 0x95,
                     OpCode::F32ConvertI32S => 0xB2,
                 }])?;
             }
@@ -184,7 +189,7 @@ mod tests {
                 &mut writer,
                 "(defn calc : f32
                 (a : f32 b : i32)
-                 (+ a (- b 1)))",
+                  (* 10 (/ (+ a (- b 1)) 2))",
             ).unwrap();
         }
         assert_eq!(
@@ -209,16 +214,22 @@ mod tests {
                 0x01, // section size,
                 0x00, // num exports
                 0x0A, // code section
-                0x0D, // section size
+                0x15, // section size
                 0x01, // num functions
-                0x0B, // func body size
+                0x13, // func body size
                 0x00, // local decl count
+                0x41, 0x0A, // i32 const 10
+                0xB2, // f32_convert_i32_s
                 0x20, 0x00, // local.get 0
                 0x20, 0x01, // local.get 1,
                 0x41, 0x01, // i32.const 1
                 0x6B, // i32.sub
                 0xB2, // f32_convert_i32_s
                 0x92, // f32.add
+                0x41, 0x02, // i32.const 2
+                0xB2, // f32_convert_i32_s
+                0x95, // f32.div
+                0x94, // f32.mul
                 0x0B, // END
             ]
         );
