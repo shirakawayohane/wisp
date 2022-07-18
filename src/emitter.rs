@@ -489,8 +489,8 @@ mod tests {
         emitter
             .emit(
                 "(defn calc : f32
-                            [a : f32 b : i32]
-                                (* 10 (/ (+ a (- b 1)) 2)))",
+                    [a : f32 b : i32]
+                        (* 10 (/ (+ a (- b 1)) 2)))",
             )
             .unwrap();
         assert_eq!(module.exports, []);
@@ -589,8 +589,9 @@ mod tests {
         let mut module = Module::default();
         let mut emitter = Emitter::new(&mut module);
         emitter.emit("
-            (defn addTwo [a: i32, b: i32] (+ a b) )
-            (export defn main [] (addTwo 10 20))
+            (defn addTwo: i32 [a: i32, b: i32] (+ a b) )
+            (export defn main []
+                (addTwo 10 20))
         ").unwrap();
         let module_functions = module.functions.borrow_mut();
         assert_eq!(
