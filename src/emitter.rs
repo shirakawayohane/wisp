@@ -1,10 +1,10 @@
 use crate::{
     env::{Env, Pointer, Variable},
-    parser::{parse, AST},
+    parser::{parse, AST, TypeAST},
     resolver::{dissolve_type, resolve_type, Type, TypeEnv},
 };
-use anyhow::{anyhow, bail, ensure, Result};
-use std::{collections::HashMap, hash::Hash, rc::Rc};
+use anyhow::{anyhow, bail, ensure, Result, Context};
+use std::{collections::HashMap, hash::Hash, rc::Rc, cell::RefCell};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportKind {
@@ -39,14 +39,18 @@ pub struct Signature {
 #[derive(Debug, PartialEq)]
 pub struct Function {
     pub signature_index: u32,
+    pub arg_types: Vec<Rc<Type>>,
+    pub result_type: Rc<Type>,
     pub body: Vec<OpCode>,
 }
 
 #[derive(PartialEq, Debug)]
 pub enum OpCode {
+    Drop,
     End,
     LocalDeclCount(u8),
     LocalGet(u8),
+    Call(u32),
     I32Const(i32),
     F32Const(f32),
     I32Add,
@@ -61,17 +65,18 @@ pub enum OpCode {
     F32ConvertI32S,
 }
 
-#[derive(Default, Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub struct Module {
     pub signatures: HashMap<Signature, u16>,
     pub exports: Vec<Export>,
-    pub functions: HashMap<String, (usize, Function)>,
+    pub functions: Rc<RefCell<HashMap<String, (usize, Function)>>>,
 }
 
 pub struct Emitter<'a> {
     module: &'a mut Module,
 }
 
+#[derive(Debug)]
 enum BinOp {
     Add,
     Sub,
@@ -79,6 +84,7 @@ enum BinOp {
     Div,
 }
 
+#[derive(Debug)]
 enum UnaryOp {
     Minus,
 }
@@ -108,7 +114,8 @@ impl<'a> Emitter<'a> {
                     codes.append(&mut temp_vec);
                     codes.push(OpCode::I32Sub);
                     Ok(Type::I32)
-                }
+                },
+                _ => bail!("Unary expression: {:?} accepts only numeric types, but found {:?}", op, operand)
             },
         }
     }
@@ -124,6 +131,7 @@ impl<'a> Emitter<'a> {
         let mut rhs_temp_vec = Vec::new();
         let lhs_type = self.emit_obj(&mut lhs_temp_vec, lhs, env)?;
         let rhs_type = self.emit_obj(&mut rhs_temp_vec, rhs, env)?;
+        let unsupported_msg = "";
         let (opcode, result_type) = match op {
             BinOp::Add => match *lhs_type {
                 Type::I32 => match *rhs_type {
@@ -133,6 +141,7 @@ impl<'a> Emitter<'a> {
                         (OpCode::F32Add, Type::F32)
                     }
                     Type::I32 => (OpCode::I32Add, Type::I32),
+                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
                 },
                 Type::F32 => match *rhs_type {
                     Type::I32 => {
@@ -141,7 +150,9 @@ impl<'a> Emitter<'a> {
                         (OpCode::F32Add, Type::F32)
                     }
                     Type::F32 => (OpCode::F32Add, Type::F32),
+                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
                 },
+                _ => bail!(unsupported_msg)
             },
             BinOp::Sub => match *lhs_type {
                 Type::I32 => match *rhs_type {
@@ -151,6 +162,7 @@ impl<'a> Emitter<'a> {
                         (OpCode::F32Sub, Type::F32)
                     }
                     Type::I32 => (OpCode::I32Sub, Type::I32),
+                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
                 },
                 Type::F32 => match *rhs_type {
                     Type::I32 => {
@@ -159,7 +171,9 @@ impl<'a> Emitter<'a> {
                         (OpCode::F32Sub, Type::F32)
                     }
                     Type::F32 => (OpCode::F32Sub, Type::F32),
+                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
                 },
+                _ => bail!("binary expression: {:?} accepts only numeric types, but first argument type is {:?}.", op, lhs_type)
             },
             BinOp::Mul => match *lhs_type {
                 Type::I32 => match *rhs_type {
@@ -169,6 +183,7 @@ impl<'a> Emitter<'a> {
                         (OpCode::F32Mul, Type::F32)
                     }
                     Type::I32 => (OpCode::I32Mul, Type::I32),
+                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
                 },
                 Type::F32 => match *rhs_type {
                     Type::F32 => (OpCode::F32Mul, Type::F32),
@@ -176,7 +191,9 @@ impl<'a> Emitter<'a> {
                         rhs_temp_vec.push(OpCode::F32ConvertI32S);
                         (OpCode::F32Mul, Type::F32)
                     }
+                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
                 },
+                _ => bail!("binary expression: {:?} accepts only numeric types, but first argument type is {:?}.", op, lhs_type)
             },
             BinOp::Div => match *lhs_type {
                 Type::I32 => match *rhs_type {
@@ -186,6 +203,7 @@ impl<'a> Emitter<'a> {
                         (OpCode::F32Div, Type::F32)
                     }
                     Type::I32 => (OpCode::I32Div, Type::I32),
+                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
                 },
                 Type::F32 => match *rhs_type {
                     Type::F32 => (OpCode::F32Div, Type::F32),
@@ -193,13 +211,29 @@ impl<'a> Emitter<'a> {
                         rhs_temp_vec.push(OpCode::F32ConvertI32S);
                         (OpCode::F32Div, Type::F32)
                     }
+                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
                 },
+                _ => bail!("binary expression: {:?} accepts only numeric types, but first argument type is {:?}.", op, lhs_type)
             },
         };
         codes.append(&mut lhs_temp_vec);
         codes.append(&mut rhs_temp_vec);
         codes.push(opcode);
         Ok(result_type)
+    }
+    fn emit_function_call(
+        &mut self,
+        codes: &mut Vec<OpCode>,
+        index: u32,
+        func: &Function,
+        args: &[AST],
+        env: &mut Env,
+    ) -> Result<Rc<Type>> {
+        for arg in args {
+            self.emit_obj(codes, arg, env)?;
+        }
+        codes.push(OpCode::Call(index as u32));
+        Ok(func.result_type.clone())
     }
     fn emit_list(&mut self, codes: &mut Vec<OpCode>, ast: &AST, env: &mut Env) -> Result<Rc<Type>> {
         match ast {
@@ -238,10 +272,15 @@ impl<'a> Emitter<'a> {
                         }
                         _ => bail!("- must be called with one or two arguments"),
                     },
-                    AST::Symbol(_) => {
-                        todo!("Impl function call")
+                    AST::Symbol(name) => {
+                        let module_functions = self.module.functions.clone();
+                        let module_func_refmut = module_functions.borrow_mut();
+                        let (index, func) = module_func_refmut.get(*name).with_context(|| format!("Unable to find function {:?}", &name))?;
+                        self.emit_function_call(codes, *index as u32, func, &list[1..], env)?
                     }
-                    _ => todo!("Only [+, -, *, /] operators can be emitted for now."),
+                    _ => todo!(
+                        "Only [+, -, *, /] operators and function call can be emitted for now."
+                    ),
                 })
             }
             _ => bail!("Invalid argument. emit_list only accepts AST::List"),
@@ -293,6 +332,7 @@ impl<'a> Emitter<'a> {
                     };
                     let (name, type_ast) = match &slice[0] {
                         AST::SymbolWithAnnotation(s, type_ast) => (*s, type_ast),
+                        AST::Symbol(s) => (*s, &TypeAST::Unit),
                         _ => bail!("A symbol with type annotaion is expected after 'defn'"),
                     };
                     let mut args = Vec::new();
@@ -318,7 +358,7 @@ impl<'a> Emitter<'a> {
             // TODO: Impl type symbol functionality
             let empty_type_env = TypeEnv::default();
 
-            let func_index = self.module.functions.len();
+            let func_index = self.module.functions.borrow().len();
             let mut new_env = Env::extend(env.clone());
             let mut local_index = 0;
             for arg in &args {
@@ -326,27 +366,53 @@ impl<'a> Emitter<'a> {
                     arg.0,
                     Variable {
                         pointer: Pointer::Local(local_index),
-                        t: Rc::new(resolve_type(arg.1, &empty_type_env)),
+                        t: resolve_type(arg.1, &empty_type_env),
                     },
                 );
                 local_index += 1;
             }
+
+            // Resolve arg types and func return type
+            let arg_types = args
+                .iter()
+                .map(|(_, type_ast)| resolve_type(type_ast, &empty_type_env))
+                .collect::<Vec<_>>();
+            let result_type = resolve_type(result_type_ast, &empty_type_env);
+
             // TODO: local variables
             let mut func_body = Vec::new();
             func_body.push(OpCode::LocalDeclCount(0));
 
-            for form in forms {
-                self.emit_obj(&mut func_body, &form, &mut new_env)?;
+            for (index, form) in forms.iter().enumerate() {
+                let last = index == forms.len() - 1;
+                if last {
+                    let last_form_type = self.emit_obj(&mut func_body, &form, &mut new_env)?;
+                    if *result_type == Type::Unit {
+                        let stack_cnt = dissolve_type(last_form_type).len();
+                        // Drop unused results
+                        for _ in 0..stack_cnt {
+                            func_body.push(OpCode::Drop);
+                        }
+                    }
+                    else if *last_form_type != *result_type {
+                        bail!("mismatched return type. Expected `{:?}`, but found `{:?}`", result_type_ast, last_form_type)
+                    }
+                } else {
+                    let emitted_type = self.emit_obj(&mut func_body, &form, &mut new_env)?;
+                    let stack_cnt = dissolve_type(emitted_type).len();
+                    // Drop unused results
+                    for _ in 0..stack_cnt {
+                        func_body.push(OpCode::Drop);
+                    }
+                }
             }
             func_body.push(OpCode::End);
 
             let signature = Signature {
                 sig_type: SignatureType::Func,
-                params: args
+                params: arg_types
                     .iter()
-                    .flat_map(|(_, type_ast)| {
-                        dissolve_type(resolve_type(type_ast, &empty_type_env))
-                    })
+                    .flat_map(|types| dissolve_type(types.clone()))
                     .collect::<Vec<_>>(),
                 results: dissolve_type(resolve_type(result_type_ast, &empty_type_env)),
             };
@@ -359,11 +425,13 @@ impl<'a> Emitter<'a> {
                 }
             };
 
-            self.module.functions.insert(
+            self.module.functions.borrow_mut().insert(
                 name.to_string(),
                 (
-                    self.module.functions.len(),
+                    func_index,
                     Function {
+                        arg_types,
+                        result_type,
                         signature_index: signature_index as u32,
                         body: func_body,
                     },
@@ -428,9 +496,12 @@ mod tests {
                 results: vec![PrimitiveType::F32]
             }
         );
+        let module_functions = module.functions.borrow_mut();
         assert_eq!(
-            module.functions["calc"].1,
+            module_functions["calc"].1,
             Function {
+                arg_types: vec![Rc::new(Type::F32), Rc::new(Type::I32)],
+                result_type: Rc::new(Type::F32),
                 signature_index: 0,
                 body: vec![
                     OpCode::LocalDeclCount(0),
@@ -466,29 +537,24 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            module.functions["neg_f32"].1,
-            Function {
-                signature_index: 0,
-                body: vec![
-                    OpCode::LocalDeclCount(0),
-                    OpCode::LocalGet(0),
-                    OpCode::F32Neg,
-                    OpCode::End
-                ]
-            }
+            module.functions.borrow_mut()["neg_f32"].1.body,
+            vec![
+                OpCode::LocalDeclCount(0),
+                OpCode::LocalGet(0),
+                OpCode::F32Neg,
+                OpCode::End
+            ]
         );
+        let module_functions = module.functions.borrow_mut();
         assert_eq!(
-            module.functions["neg_i32"].1,
-            Function {
-                signature_index: 1,
-                body: vec![
-                    OpCode::LocalDeclCount(0),
-                    OpCode::I32Const(0),
-                    OpCode::LocalGet(0),
-                    OpCode::I32Sub,
-                    OpCode::End
-                ]
-            }
+            module_functions["neg_i32"].1.body,
+            vec![
+                OpCode::LocalDeclCount(0),
+                OpCode::I32Const(0),
+                OpCode::LocalGet(0),
+                OpCode::I32Sub,
+                OpCode::End
+            ]
         )
     }
     #[test]
@@ -509,6 +575,27 @@ mod tests {
                 func_index: 0,
                 name: "addTwo".to_string()
             }]
+        )
+    }
+    #[test]
+    fn test_function_call() {
+        let mut module = Module::default();
+        let mut emitter = Emitter::new(&mut module);
+        emitter.emit("
+            (defn addTwo (a: i32, b: i32) (+ a b) )
+            (export defn main () (addTwo 10 20))
+        ").unwrap();
+        let module_functions = module.functions.borrow_mut();
+        assert_eq!(
+            module_functions["main"].1.body,
+            vec![
+                OpCode::LocalDeclCount(0),
+                OpCode::I32Const(10),
+                OpCode::I32Const(20),
+                OpCode::Call(0),
+                OpCode::Drop,
+                OpCode::End
+            ]
         )
     }
 }

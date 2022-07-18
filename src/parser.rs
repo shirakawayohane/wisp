@@ -5,6 +5,7 @@ use anyhow::{anyhow, bail, Context, Result};
 pub enum TypeAST {
     I32,
     F32,
+    Unit,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -65,12 +65,18 @@ fn write_function_body(writer: &mut impl Write, func: &Function) -> Result<()> {
                 writer.write(&[0x20])?;
                 encode_leb128(writer, *n)?;
             }
+            OpCode::Call(index) => {
+                writer.write(&[0x10])?;
+                encode_leb128(writer, *index)?;
+            }
             _ => {
                 writer.write(&[match opcode {
                     OpCode::LocalDeclCount(_)
                     | OpCode::F32Const(_)
                     | OpCode::I32Const(_)
-                    | OpCode::LocalGet(_) => unreachable!(),
+                    | OpCode::LocalGet(_)
+                    | OpCode::Call(_) => unreachable!(),
+                    OpCode::Drop => 0x1A,
                     OpCode::End => 0x0B,
                     OpCode::I32Add => 0x6A,
                     OpCode::I32Sub => 0x6B,
@@ -97,7 +103,6 @@ fn write_type_section(writer: &mut impl Write, signatures: Vec<&Signature>) -> R
     for signature in signatures {
         write_signature(&mut type_section, &signature)?;
     }
-    dbg!(&type_section.len());
     encode_leb128(writer, type_section.len() as u64)?; // section size
     writer.write(&type_section[..])?;
     writer.flush()?;
@@ -158,8 +163,8 @@ pub fn compile_into_wasm<W: Write>(writer: &mut BufWriter<W>, source: &str) -> R
     let mut signatures_with_index = module.signatures.iter().collect::<Vec<_>>();
     signatures_with_index.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
     let signatures = signatures_with_index.into_iter().map(|x| x.0).collect::<Vec<_>>();
-
-    let mut functions_with_index = module.functions.iter().map(|x| x.1).collect::<Vec<_>>();
+    let module_funcs = module.functions.borrow();
+    let mut functions_with_index = module_funcs.iter().map(|x| x.1).collect::<Vec<_>>();
     functions_with_index.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
     let functions = functions_with_index.iter().map(|x| &x.1).collect::<Vec<_>>();
 
