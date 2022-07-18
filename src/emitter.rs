@@ -38,7 +38,6 @@ pub struct Signature {
 
 #[derive(Debug, PartialEq)]
 pub struct Function {
-    pub name: String,
     pub signature_index: u32,
     pub body: Vec<OpCode>,
 }
@@ -66,7 +65,7 @@ pub enum OpCode {
 pub struct Module {
     pub signatures: HashMap<Signature, u16>,
     pub exports: Vec<Export>,
-    pub functions: Vec<Function>,
+    pub functions: HashMap<String, (usize, Function)>,
 }
 
 pub struct Emitter<'a> {
@@ -360,11 +359,16 @@ impl<'a> Emitter<'a> {
                 }
             };
 
-            self.module.functions.push(Function {
-                name: name.to_string(),
-                signature_index: signature_index as u32,
-                body: func_body,
-            });
+            self.module.functions.insert(
+                name.to_string(),
+                (
+                    self.module.functions.len(),
+                    Function {
+                        signature_index: signature_index as u32,
+                        body: func_body,
+                    },
+                ),
+            );
 
             if is_export {
                 self.module.exports.push(Export {
@@ -425,9 +429,8 @@ mod tests {
             }
         );
         assert_eq!(
-            module.functions[0],
+            module.functions["calc"].1,
             Function {
-                name: "calc".to_string(),
                 signature_index: 0,
                 body: vec![
                     OpCode::LocalDeclCount(0),
@@ -454,18 +457,17 @@ mod tests {
         let mut emitter = Emitter::new(&mut module);
         emitter
             .emit(
-                "(defn neg: f32
+                "(defn neg_f32: f32
                             (n: f32)
                                 (- n))
-                        (defn neg: i32
+                        (defn neg_i32: i32
                             (n: i32)
                                 (- n))",
             )
             .unwrap();
         assert_eq!(
-            module.functions[0],
+            module.functions["neg_f32"].1,
             Function {
-                name: "neg".to_string(),
                 signature_index: 0,
                 body: vec![
                     OpCode::LocalDeclCount(0),
@@ -476,9 +478,8 @@ mod tests {
             }
         );
         assert_eq!(
-            module.functions[1],
+            module.functions["neg_i32"].1,
             Function {
-                name: "neg".to_string(),
                 signature_index: 1,
                 body: vec![
                     OpCode::LocalDeclCount(0),
