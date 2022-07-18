@@ -4,7 +4,7 @@ use crate::{
     resolver::{dissolve_type, resolve_type, Type, TypeEnv},
 };
 use anyhow::{anyhow, bail, ensure, Result, Context};
-use std::{collections::HashMap, hash::Hash, rc::Rc, cell::RefCell};
+use std::{collections::HashMap, hash::Hash, rc::Rc, cell::{RefCell, Ref}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportKind {
@@ -98,7 +98,7 @@ impl<'a> Emitter<'a> {
         codes: &mut Vec<OpCode>,
         op: UnaryOp,
         operand: &AST,
-        env: &mut Env,
+        env: Rc<RefCell<Env>>,
     ) -> Result<Type> {
         let mut temp_vec = Vec::new();
         let t = self.emit_obj(&mut temp_vec, operand, env)?;
@@ -125,12 +125,12 @@ impl<'a> Emitter<'a> {
         op: BinOp,
         lhs: &AST,
         rhs: &AST,
-        env: &mut Env,
+        env: Rc<RefCell<Env>>,
     ) -> Result<Type> {
         let mut lhs_temp_vec = Vec::new();
         let mut rhs_temp_vec = Vec::new();
-        let lhs_type = self.emit_obj(&mut lhs_temp_vec, lhs, env)?;
-        let rhs_type = self.emit_obj(&mut rhs_temp_vec, rhs, env)?;
+        let lhs_type = self.emit_obj(&mut lhs_temp_vec, lhs, env.clone())?;
+        let rhs_type = self.emit_obj(&mut rhs_temp_vec, rhs, env.clone())?;
         let unsupported_msg = "";
         let (opcode, result_type) = match op {
             BinOp::Add => match *lhs_type {
@@ -227,15 +227,28 @@ impl<'a> Emitter<'a> {
         index: u32,
         func: &Function,
         args: &[AST],
-        env: &mut Env,
+        env: Rc<RefCell<Env>>,
     ) -> Result<Rc<Type>> {
         for arg in args {
-            self.emit_obj(codes, arg, env)?;
+            self.emit_obj(codes, arg, env.clone())?;
         }
         codes.push(OpCode::Call(index as u32));
         Ok(func.result_type.clone())
     }
-    fn emit_list(&mut self, codes: &mut Vec<OpCode>, ast: &AST, env: &mut Env) -> Result<Rc<Type>> {
+    fn emit_let(&mut self, codes: &mut Vec<OpCode>, ast: &AST, env: Rc<RefCell<Env>>) -> Result<Rc<Type>> {
+        if let AST::List(list) = ast {
+            let slice = &list[..];
+            ensure!(slice.len() > 3);
+            let (bindings, forms) = match &slice[0] {
+                AST::Symbol("let") => (&slice[1], &slice[2..]),
+                _ => bail!("hoge")
+            };
+            todo!()
+        } else {
+            unreachable!()
+        }
+    }
+    fn emit_list(&mut self, codes: &mut Vec<OpCode>, ast: &AST, env: Rc<RefCell<Env>>) -> Result<Rc<Type>> {
         match ast {
             AST::List(list) => {
                 let first = &list[0];
@@ -274,9 +287,7 @@ impl<'a> Emitter<'a> {
                     },
                     AST::Symbol(name) => {
                         match *name {
-                            "let" => {
-                                todo!()
-                            }
+                            "let" => self.emit_let(codes, ast, env)?,
                             _ => { // emit function call
                                 let module_functions = self.module.functions.clone();
                                 let module_func_refmut = module_functions.borrow_mut();
@@ -293,7 +304,7 @@ impl<'a> Emitter<'a> {
             _ => bail!("Invalid argument. emit_list only accepts AST::List"),
         }
     }
-    fn emit_obj(&mut self, codes: &mut Vec<OpCode>, ast: &AST, env: &mut Env) -> Result<Rc<Type>> {
+    fn emit_obj(&mut self, codes: &mut Vec<OpCode>, ast: &AST, env: Rc<RefCell<Env>>) -> Result<Rc<Type>> {
         match ast {
             AST::List(_) => return self.emit_list(codes, ast, env),
             // TODO: Infer type
@@ -308,7 +319,7 @@ impl<'a> Emitter<'a> {
                     bail!("Failed to parse number");
                 }
             }
-            AST::Symbol(name) => match env.get(name) {
+            AST::Symbol(name) => match env.borrow().get(name) {
                 None => bail!("Symbol {} not found in this scope", name),
                 Some(variable) => match variable.pointer {
                     Pointer::Local(index) => {
@@ -366,10 +377,10 @@ impl<'a> Emitter<'a> {
             let empty_type_env = TypeEnv::default();
 
             let func_index = self.module.functions.borrow().len();
-            let mut new_env = Env::extend(env.clone());
+            let new_env = Rc::new(RefCell::new(Env::extend(env.clone())));
             let mut local_index = 0;
             for arg in &args {
-                new_env.set(
+                new_env.borrow_mut().set(
                     arg.0,
                     Variable {
                         pointer: Pointer::Local(local_index),
@@ -393,7 +404,7 @@ impl<'a> Emitter<'a> {
             for (index, form) in forms.iter().enumerate() {
                 let last = index == forms.len() - 1;
                 if last {
-                    let last_form_type = self.emit_obj(&mut func_body, &form, &mut new_env)?;
+                    let last_form_type = self.emit_obj(&mut func_body, &form, new_env.clone())?;
                     if *result_type == Type::Unit {
                         let stack_cnt = dissolve_type(last_form_type).len();
                         // Drop unused results
@@ -405,7 +416,7 @@ impl<'a> Emitter<'a> {
                         bail!("mismatched return type. Expected `{:?}`, but found `{:?}`", result_type_ast, last_form_type)
                     }
                 } else {
-                    let emitted_type = self.emit_obj(&mut func_body, &form, &mut new_env)?;
+                    let emitted_type = self.emit_obj(&mut func_body, &form, new_env.clone())?;
                     let stack_cnt = dissolve_type(emitted_type).len();
                     // Drop unused results
                     for _ in 0..stack_cnt {
