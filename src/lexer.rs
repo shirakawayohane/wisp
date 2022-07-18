@@ -41,7 +41,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>> {
                     } else {
                         eaten = src
                             .find(|c: char| {
-                                c.is_whitespace() || c == ',' || SPECIAL_CHARS.contains(&c)
+                                c.is_whitespace() || SPECIAL_CHARS.contains(&c)
                             })
                             .unwrap();
                         let name = &src[0..eaten];

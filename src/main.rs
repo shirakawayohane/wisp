@@ -1,13 +1,15 @@
 use anyhow::{ensure, Result};
-use emitter::Emitter;
 use std::{fs::File, io::{BufWriter}, path::{Path, PathBuf}};
 
-mod encoder;
-mod emitter;
+use crate::{compiler::compile_into_wasm};
+
 mod lexer;
 mod parser;
+mod encoder;
 mod env;
+mod emitter;
 mod resolver;
+mod compiler;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -21,7 +23,6 @@ fn main() -> Result<()> {
     let source = std::fs::read_to_string(&source_path)?;
     let target_file = File::create(&target_path)?;
     let mut writer = BufWriter::new(target_file);
-    let mut emitter = Emitter::new(&mut writer);
-    emitter.emit(&source)?;
+    compile_into_wasm(&mut writer, &source)?;
     Ok(())
 }
