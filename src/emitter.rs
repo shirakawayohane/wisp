@@ -4,12 +4,7 @@ use crate::{
     resolver::{dissolve_type, resolve_type, Type, TypeEnv},
 };
 use anyhow::{anyhow, bail, ensure, Context, Result};
-use std::{
-    cell::{RefCell},
-    collections::HashMap,
-    hash::Hash,
-    rc::Rc, borrow::Borrow,
-};
+use std::{borrow::Borrow, cell::RefCell, collections::HashMap, hash::Hash, rc::Rc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportKind {
@@ -19,7 +14,7 @@ pub enum ExportKind {
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub enum WasmPrimitiveType {
     I32 = 0x7F,
-    F32 = 0x7D
+    F32 = 0x7D,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -245,6 +240,28 @@ impl<'a> Emitter<'a> {
         codes.push(OpCode::Call(index as u32));
         Ok(func.result_type.clone())
     }
+    fn emit_scope(
+        &mut self,
+        codes: &mut Vec<OpCode>,
+        forms: &[AST],
+        env: Rc<RefCell<Env>>,
+    ) -> Result<Rc<Type>> {
+        for (index, form) in forms.iter().enumerate() {
+            let last = index == forms.len() - 1;
+            if last {
+                let result_type = self.emit_obj(codes, &form, env.clone())?;
+                return Ok(result_type);
+            } else {
+                let emitted_type = self.emit_obj(codes, &form, env.clone())?;
+                let stack_cnt = dissolve_type(emitted_type).len();
+                // Drop unused results
+                for _ in 0..stack_cnt {
+                    codes.push(OpCode::Drop);
+                }
+            }
+        }
+        unreachable!();
+    }
     fn emit_let(
         &mut self,
         codes: &mut Vec<OpCode>,
@@ -270,7 +287,7 @@ impl<'a> Emitter<'a> {
                             let value = &bindings[i * 2 + 1];
                             let value_type = self.emit_obj(codes, value, new_env.clone())?;
                             let local_index = (*new_env.clone()).borrow().count_local_vars() as u8;
-                            let pointer = Pointer::Local(local_index); 
+                            let pointer = Pointer::Local(local_index);
                             // prohibit local var redefinition
                             match new_env.borrow_mut().set(
                                 variable_name,
@@ -295,33 +312,22 @@ impl<'a> Emitter<'a> {
                                     codes.push(OpCode::LocalDecl(WasmPrimitiveType::I32));
                                     codes.push(OpCode::LocalSet(local_index));
                                 }
-                                Type::Unit => bail!("hoge")
+                                Type::Unit => bail!("hoge"),
                             }
-                        },
+                        }
                         AST::SymbolWithAnnotation(_, _) => {
                             todo!("Impl local decl with type annotation");
-                        },
-                        _ => bail!("let binding accepts only symbol for odd-numbered forms, found {:?}", bindings[i * 2])
-                    }
-                }
-                for (index, form) in forms.iter().enumerate() {
-                    let last = index == forms.len() - 1;
-                    if last {
-                        let result_type = self.emit_obj(codes, &form, new_env.clone())?;
-                        return Ok(result_type)
-                    } else {
-                        let emitted_type = self.emit_obj(codes, &form, new_env.clone())?;
-                        let stack_cnt = dissolve_type(emitted_type).len();
-                        // Drop unused results
-                        for _ in 0..stack_cnt {
-                            codes.push(OpCode::Drop);
                         }
+                        _ => bail!(
+                            "let binding accepts only symbol for odd-numbered forms, found {:?}",
+                            bindings[i * 2]
+                        ),
                     }
                 }
+                return self.emit_scope(codes, forms, new_env);
             } else {
                 bail!("A binding vector is expected after 'let'")
             }
-            todo!()
         } else {
             unreachable!()
         }
@@ -416,10 +422,10 @@ impl<'a> Emitter<'a> {
                 } else {
                     bail!("Failed to parse number");
                 }
-            },
+            }
             AST::BoolLiteral(b) => {
                 codes.push(OpCode::I32Const(if *b { 1 } else { 0 }));
-                return Ok(Rc::new(Type::Bool))
+                return Ok(Rc::new(Type::Bool));
             }
             AST::Symbol(name) => match (*env.clone()).borrow().get(name) {
                 None => bail!("Symbol {} not found in this scope", name),
@@ -501,32 +507,23 @@ impl<'a> Emitter<'a> {
 
             let mut func_body = Vec::new();
 
-            for (index, form) in forms.iter().enumerate() {
-                let last = index == forms.len() - 1;
-                if last {
-                    let last_form_type = self.emit_obj(&mut func_body, &form, new_env.clone())?;
-                    if *result_type == Type::Unit {
-                        let stack_cnt = dissolve_type(last_form_type).len();
-                        // Drop unused results
-                        for _ in 0..stack_cnt {
-                            func_body.push(OpCode::Drop);
-                        }
-                    } else if *last_form_type != *result_type {
-                        bail!(
-                            "mismatched return type. Expected `{:?}`, but found `{:?}`",
-                            result_type_ast,
-                            last_form_type
-                        )
-                    }
-                } else {
-                    let emitted_type = self.emit_obj(&mut func_body, &form, new_env.clone())?;
-                    let stack_cnt = dissolve_type(emitted_type).len();
-                    // Drop unused results
-                    for _ in 0..stack_cnt {
-                        func_body.push(OpCode::Drop);
-                    }
+            let scope_result_type = self.emit_scope(&mut func_body, &forms, new_env)?;
+
+            if *result_type == Type::Unit {
+                let stack_cnt = dissolve_type(scope_result_type).len();
+                // Drop unused results
+                for _ in 0..stack_cnt {
+                    func_body.push(OpCode::Drop);
                 }
+            } else if *scope_result_type != *result_type {
+                // Validate return type
+                bail!(
+                    "mismatched return type. Expected `{:?}`, but found `{:?}`",
+                    result_type_ast,
+                    scope_result_type,
+                )
             }
+
             func_body.push(OpCode::End);
 
             let signature = Signature {
@@ -658,11 +655,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             module.functions.borrow_mut()["neg_f32"].1.body,
-            vec![
-                OpCode::LocalGet(0),
-                OpCode::F32Neg,
-                OpCode::End
-            ]
+            vec![OpCode::LocalGet(0), OpCode::F32Neg, OpCode::End]
         );
         let module_functions = module.functions.borrow_mut();
         assert_eq!(
@@ -694,6 +687,64 @@ mod tests {
                 name: "addTwo".to_string()
             }]
         )
+    }
+    #[test]
+    fn test_drop() {
+        let mut module = Module::default();
+        let mut emitter = Emitter::new(&mut module);
+        emitter
+            .emit(
+                "
+            (defn add_two: i32 [a: i32, b: i32] (+ a b))
+            (defn add_two_and_discard [a: i32, b: i32] (+ a b))
+            (defn discard_each_form: i32 []
+                (add_two 1 2)
+                (add_two 1 2)
+                (add_two_and_discard 1 2)
+                (add_two 1 2))
+        ",
+            )
+            .unwrap();
+        let module_functions = module.functions.borrow_mut();
+        assert_eq!(
+            module_functions["add_two"].1.body,
+            vec![
+                OpCode::LocalGet(0),
+                OpCode::LocalGet(1),
+                OpCode::I32Add,
+                OpCode::End
+            ]
+        );
+        assert_eq!(
+            module_functions["add_two_and_discard"].1.body,
+            vec![
+                OpCode::LocalGet(0),
+                OpCode::LocalGet(1),
+                OpCode::I32Add,
+                OpCode::Drop,
+                OpCode::End
+            ]
+        );
+        assert_eq!(
+            module_functions["discard_each_form"].1.body,
+            vec![
+                OpCode::I32Const(1),
+                OpCode::I32Const(2),
+                OpCode::Call(0),
+                OpCode::Drop,
+                OpCode::I32Const(1),
+                OpCode::I32Const(2),
+                OpCode::Call(0),
+                OpCode::Drop,
+                OpCode::I32Const(1),
+                OpCode::I32Const(2),
+                OpCode::Call(1),
+                OpCode::I32Const(1),
+                OpCode::I32Const(2),
+                OpCode::Call(0),
+                OpCode::End,
+            ]
+        );
     }
     #[test]
     fn test_function_call() {
@@ -755,17 +806,18 @@ mod tests {
     fn test_bool() {
         let mut module = Module::default();
         let mut emitter = Emitter::new(&mut module);
-        emitter.emit("
+        emitter
+            .emit(
+                "
         (defn get-true: bool []
             true)
-        ").unwrap();
+        ",
+            )
+            .unwrap();
         let functions = module.functions.borrow_mut();
         assert_eq!(
             functions["get-true"].1.body,
-            vec![
-                OpCode::I32Const(1),
-                OpCode::End
-            ]
+            vec![OpCode::I32Const(1), OpCode::End]
         )
     }
 }
