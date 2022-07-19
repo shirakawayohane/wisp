@@ -1,3 +1,6 @@
+(defn addTwoAnd30: i32 [a: i32, b: i32]
+    (let [c 30]
+        (+ c (+ a b))))
 
-(defn addTwo: i32 (a: i32, b: i32) (+ a b) )
-(export defn main () (addTwo 10 20))
+(export defn main []
+    (addTwoAnd30 10 20))

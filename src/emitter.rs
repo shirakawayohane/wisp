@@ -1,10 +1,15 @@
 use crate::{
     env::{Env, Pointer, Variable},
-    parser::{parse_source, AST, TypeAST},
+    parser::{parse_source, TypeAST, AST},
     resolver::{dissolve_type, resolve_type, Type, TypeEnv},
 };
-use anyhow::{anyhow, bail, ensure, Result, Context};
-use std::{collections::HashMap, hash::Hash, rc::Rc, cell::{RefCell, Ref}};
+use anyhow::{anyhow, bail, ensure, Context, Result};
+use std::{
+    cell::{RefCell},
+    collections::HashMap,
+    hash::Hash,
+    rc::Rc, borrow::Borrow,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportKind {
@@ -14,7 +19,7 @@ pub enum ExportKind {
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub enum PrimitiveType {
     I32 = 0x7F,
-    F32 = 0x6F,
+    F32 = 0x7D
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,8 +53,9 @@ pub struct Function {
 pub enum OpCode {
     Drop,
     End,
-    LocalDeclCount(u8),
     LocalGet(u8),
+    LocalSet(u8),
+    LocalDecl(PrimitiveType),
     Call(u32),
     I32Const(i32),
     F32Const(f32),
@@ -114,8 +120,12 @@ impl<'a> Emitter<'a> {
                     codes.append(&mut temp_vec);
                     codes.push(OpCode::I32Sub);
                     Ok(Type::I32)
-                },
-                _ => bail!("Unary expression: {:?} accepts only numeric types, but found {:?}", op, operand)
+                }
+                _ => bail!(
+                    "Unary expression: {:?} accepts only numeric types, but found {:?}",
+                    op,
+                    operand
+                ),
             },
         }
     }
@@ -235,20 +245,89 @@ impl<'a> Emitter<'a> {
         codes.push(OpCode::Call(index as u32));
         Ok(func.result_type.clone())
     }
-    fn emit_let(&mut self, codes: &mut Vec<OpCode>, ast: &AST, env: Rc<RefCell<Env>>) -> Result<Rc<Type>> {
+    fn emit_let(
+        &mut self,
+        codes: &mut Vec<OpCode>,
+        ast: &AST,
+        env: Rc<RefCell<Env>>,
+    ) -> Result<Rc<Type>> {
         if let AST::List(list) = ast {
             let slice = &list[..];
-            ensure!(slice.len() > 3);
-            let (bindings, forms) = match &slice[0] {
+            ensure!(slice.len() > 2);
+            let (binding_vector, forms) = match &slice[0] {
                 AST::Symbol("let") => (&slice[1], &slice[2..]),
-                _ => bail!("hoge")
+                _ => bail!("hoge"),
             };
+            if let AST::Vector(bindings) = binding_vector {
+                ensure!(
+                    bindings.len() % 2 == 0,
+                    "let accepts only even number forms."
+                );
+                let new_env = Rc::new(RefCell::new(Env::extend(env)));
+                for i in 0..bindings.len() / 2 {
+                    match bindings[i * 2] {
+                        AST::Symbol(variable_name) => {
+                            let value = &bindings[i * 2 + 1];
+                            let value_type = self.emit_obj(codes, value, new_env.clone())?;
+                            let local_index = (*new_env.clone()).borrow().count_local_vars() as u8;
+                            let pointer = Pointer::Local(local_index); 
+                            // prohibit local var redefinition
+                            match new_env.borrow_mut().set(
+                                variable_name,
+                                Variable {
+                                    pointer,
+                                    t: value_type.clone(),
+                                },
+                            ) {
+                                None => (),
+                                Some(_) => bail!("redefinition of {}", variable_name),
+                            }
+                            match value_type.borrow() {
+                                Type::F32 => {
+                                    codes.push(OpCode::LocalDecl(PrimitiveType::F32));
+                                    codes.push(OpCode::LocalSet(local_index));
+                                }
+                                Type::I32 => {
+                                    codes.push(OpCode::LocalDecl(PrimitiveType::I32));
+                                    codes.push(OpCode::LocalSet(local_index));
+                                }
+                                Type::Unit => bail!("hoge")
+                            }
+                        },
+                        AST::SymbolWithAnnotation(_, _) => {
+                            todo!("Impl local decl with type annotation");
+                        },
+                        _ => bail!("let binding accepts only symbol for odd-numbered forms, found {:?}", bindings[i * 2])
+                    }
+                }
+                for (index, form) in forms.iter().enumerate() {
+                    let last = index == forms.len() - 1;
+                    if last {
+                        let result_type = self.emit_obj(codes, &form, new_env.clone())?;
+                        return Ok(result_type)
+                    } else {
+                        let emitted_type = self.emit_obj(codes, &form, new_env.clone())?;
+                        let stack_cnt = dissolve_type(emitted_type).len();
+                        // Drop unused results
+                        for _ in 0..stack_cnt {
+                            codes.push(OpCode::Drop);
+                        }
+                    }
+                }
+            } else {
+                bail!("A binding vector is expected after 'let'")
+            }
             todo!()
         } else {
             unreachable!()
         }
     }
-    fn emit_list(&mut self, codes: &mut Vec<OpCode>, ast: &AST, env: Rc<RefCell<Env>>) -> Result<Rc<Type>> {
+    fn emit_list(
+        &mut self,
+        codes: &mut Vec<OpCode>,
+        ast: &AST,
+        env: Rc<RefCell<Env>>,
+    ) -> Result<Rc<Type>> {
         match ast {
             AST::List(list) => {
                 let first = &list[0];
@@ -288,11 +367,21 @@ impl<'a> Emitter<'a> {
                     AST::Symbol(name) => {
                         match *name {
                             "let" => self.emit_let(codes, ast, env)?,
-                            _ => { // emit function call
+                            _ => {
+                                // emit function call
                                 let module_functions = self.module.functions.clone();
                                 let module_func_refmut = module_functions.borrow_mut();
-                                let (index, func) = module_func_refmut.get(*name).with_context(|| format!("Unable to find function {:?}", &name))?;
-                                self.emit_function_call(codes, *index as u32, func, &list[1..], env)?
+                                let (index, func) =
+                                    module_func_refmut.get(*name).with_context(|| {
+                                        format!("Unable to find function {:?}", &name)
+                                    })?;
+                                self.emit_function_call(
+                                    codes,
+                                    *index as u32,
+                                    func,
+                                    &list[1..],
+                                    env,
+                                )?
                             }
                         }
                     }
@@ -304,7 +393,12 @@ impl<'a> Emitter<'a> {
             _ => bail!("Invalid argument. emit_list only accepts AST::List"),
         }
     }
-    fn emit_obj(&mut self, codes: &mut Vec<OpCode>, ast: &AST, env: Rc<RefCell<Env>>) -> Result<Rc<Type>> {
+    fn emit_obj(
+        &mut self,
+        codes: &mut Vec<OpCode>,
+        ast: &AST,
+        env: Rc<RefCell<Env>>,
+    ) -> Result<Rc<Type>> {
         match ast {
             AST::List(_) => return self.emit_list(codes, ast, env),
             // TODO: Infer type
@@ -319,7 +413,7 @@ impl<'a> Emitter<'a> {
                     bail!("Failed to parse number");
                 }
             }
-            AST::Symbol(name) => match env.borrow().get(name) {
+            AST::Symbol(name) => match (*env.clone()).borrow().get(name) {
                 None => bail!("Symbol {} not found in this scope", name),
                 Some(variable) => match variable.pointer {
                     Pointer::Local(index) => {
@@ -331,7 +425,7 @@ impl<'a> Emitter<'a> {
             _ => todo!(),
         }
     }
-    fn emit_func(&mut self, ast: &AST, env: Rc<Env>) -> Result<()> {
+    fn emit_func(&mut self, ast: &AST, env: Rc<RefCell<Env>>) -> Result<()> {
         if let AST::List(func_list) = ast {
             let mut slice = &func_list[..];
             let (is_export, name, result_type_ast, args, forms) = match func_list[0] {
@@ -376,7 +470,7 @@ impl<'a> Emitter<'a> {
             // TODO: Impl type symbol functionality
             let empty_type_env = TypeEnv::default();
 
-            let func_index = self.module.functions.borrow().len();
+            let func_index = (*self.module.functions.clone()).borrow().len();
             let new_env = Rc::new(RefCell::new(Env::extend(env.clone())));
             let mut local_index = 0;
             for arg in &args {
@@ -397,9 +491,7 @@ impl<'a> Emitter<'a> {
                 .collect::<Vec<_>>();
             let result_type = resolve_type(result_type_ast, &empty_type_env);
 
-            // TODO: local variables
             let mut func_body = Vec::new();
-            func_body.push(OpCode::LocalDeclCount(0));
 
             for (index, form) in forms.iter().enumerate() {
                 let last = index == forms.len() - 1;
@@ -411,9 +503,12 @@ impl<'a> Emitter<'a> {
                         for _ in 0..stack_cnt {
                             func_body.push(OpCode::Drop);
                         }
-                    }
-                    else if *last_form_type != *result_type {
-                        bail!("mismatched return type. Expected `{:?}`, but found `{:?}`", result_type_ast, last_form_type)
+                    } else if *last_form_type != *result_type {
+                        bail!(
+                            "mismatched return type. Expected `{:?}`, but found `{:?}`",
+                            result_type_ast,
+                            last_form_type
+                        )
                     }
                 } else {
                     let emitted_type = self.emit_obj(&mut func_body, &form, new_env.clone())?;
@@ -471,7 +566,7 @@ impl<'a> Emitter<'a> {
     fn emit_toplevel(&mut self, ast: &AST) -> Result<()> {
         // TODO: Impl Global Variables
         // toplevel can only be a function for now.
-        self.emit_func(ast, Rc::new(Env::default()))
+        self.emit_func(ast, Rc::new(RefCell::new(Env::default())))
     }
     fn emit_module(&mut self, ast: &AST) -> Result<()> {
         let toplevels = match ast {
@@ -522,7 +617,6 @@ mod tests {
                 result_type: Rc::new(Type::F32),
                 signature_index: 0,
                 body: vec![
-                    OpCode::LocalDeclCount(0),
                     OpCode::I32Const(10),
                     OpCode::F32ConvertI32S,
                     OpCode::LocalGet(0),
@@ -557,7 +651,6 @@ mod tests {
         assert_eq!(
             module.functions.borrow_mut()["neg_f32"].1.body,
             vec![
-                OpCode::LocalDeclCount(0),
                 OpCode::LocalGet(0),
                 OpCode::F32Neg,
                 OpCode::End
@@ -567,7 +660,6 @@ mod tests {
         assert_eq!(
             module_functions["neg_i32"].1.body,
             vec![
-                OpCode::LocalDeclCount(0),
                 OpCode::I32Const(0),
                 OpCode::LocalGet(0),
                 OpCode::I32Sub,
@@ -599,20 +691,54 @@ mod tests {
     fn test_function_call() {
         let mut module = Module::default();
         let mut emitter = Emitter::new(&mut module);
-        emitter.emit("
+        emitter
+            .emit(
+                "
             (defn addTwo: i32 [a: i32, b: i32] (+ a b) )
             (export defn main []
                 (addTwo 10 20))
-        ").unwrap();
+        ",
+            )
+            .unwrap();
         let module_functions = module.functions.borrow_mut();
         assert_eq!(
             module_functions["main"].1.body,
             vec![
-                OpCode::LocalDeclCount(0),
                 OpCode::I32Const(10),
                 OpCode::I32Const(20),
                 OpCode::Call(0),
                 OpCode::Drop,
+                OpCode::End
+            ]
+        )
+    }
+    #[test]
+    fn test_let() {
+        let mut module = Module::default();
+        let mut emitter = Emitter::new(&mut module);
+        emitter
+            .emit(
+                "
+            (defn addTwo: i32 []
+                (let [a 10
+                      b 20]
+                    (+ a b)))
+        ",
+            )
+            .unwrap();
+        let module_functions = module.functions.borrow_mut();
+        assert_eq!(
+            module_functions["addTwo"].1.body,
+            vec![
+                OpCode::I32Const(10),
+                OpCode::LocalDecl(PrimitiveType::I32),
+                OpCode::LocalSet(0),
+                OpCode::I32Const(20),
+                OpCode::LocalDecl(PrimitiveType::I32),
+                OpCode::LocalSet(1),
+                OpCode::LocalGet(0),
+                OpCode::LocalGet(1),
+                OpCode::I32Add,
                 OpCode::End
             ]
         )

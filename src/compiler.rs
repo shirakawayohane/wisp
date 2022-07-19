@@ -1,8 +1,8 @@
 use crate::{
-    emitter::{Emitter, Export, ExportKind, Function, OpCode, Signature, Module},
+    emitter::{Emitter, Export, ExportKind, Function, Module, OpCode, Signature, PrimitiveType},
     encoder::{encode_leb128, encode_s_leb128, encode_string},
 };
-use anyhow::Result;
+use anyhow::{Result};
 use std::io::{BufWriter, Write};
 
 pub enum SectionCode {
@@ -32,7 +32,7 @@ fn write_signature<W: Write>(writer: &mut W, signature: &Signature) -> Result<()
         &signature
             .results
             .iter()
-            .map(|r| *r as u8)
+            .map(|p| *p as u8)
             .collect::<Vec<_>>()[..],
     )?;
     Ok(())
@@ -48,10 +48,42 @@ fn write_export(writer: &mut impl Write, export: &Export) -> Result<()> {
 }
 
 fn write_function_body(writer: &mut impl Write, func: &Function) -> Result<()> {
+    let mut i32_locals: u8 = 0;
+    let mut f32_locals: u8 = 0;
+    let mut opcodes = Vec::new();
     for opcode in &func.body {
         match opcode {
-            OpCode::LocalDeclCount(count) => {
-                encode_leb128(writer, *count)?;
+            OpCode::LocalDecl(v) => match v {
+                PrimitiveType::I32 => {
+                    i32_locals += 1;
+                }
+                PrimitiveType::F32 => {
+                    f32_locals += 1;
+                }
+            },
+            _ => {
+                opcodes.push(opcode);
+            }
+        }
+    }
+    // First, bundle local decls.
+    let local_decl_count = [i32_locals > 0, f32_locals > 0].iter().filter(|x| **x).count();
+    encode_leb128(writer, local_decl_count as u64)?;
+    if i32_locals > 0 {
+        encode_leb128(writer, i32_locals)?; // local type count
+        writer.write(&[0x7f])?; // i32
+    }
+    if f32_locals > 0 {
+        encode_leb128(writer, f32_locals)?; // local type count
+        writer.write(&[0x7d])?;
+    }
+
+    for opcode in &opcodes {
+        match opcode {
+            OpCode::LocalDecl(_) => unreachable!(),
+            OpCode::LocalSet(index) => {
+                writer.write(&[0x21])?;
+                encode_leb128(writer, *index)?;
             }
             OpCode::F32Const(n) => {
                 writer.write(&[0x43])?;
@@ -71,11 +103,12 @@ fn write_function_body(writer: &mut impl Write, func: &Function) -> Result<()> {
             }
             _ => {
                 writer.write(&[match opcode {
-                    OpCode::LocalDeclCount(_)
-                    | OpCode::F32Const(_)
+                    OpCode::F32Const(_)
                     | OpCode::I32Const(_)
                     | OpCode::LocalGet(_)
-                    | OpCode::Call(_) => unreachable!(),
+                    | OpCode::LocalSet(_)
+                    | OpCode::Call(_)
+                    | OpCode::LocalDecl(_) => unreachable!(),
                     OpCode::Drop => 0x1A,
                     OpCode::End => 0x0B,
                     OpCode::I32Add => 0x6A,
@@ -162,12 +195,17 @@ pub fn compile_into_wasm<W: Write>(writer: &mut BufWriter<W>, source: &str) -> R
 
     let mut signatures_with_index = module.signatures.iter().collect::<Vec<_>>();
     signatures_with_index.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
-    let signatures = signatures_with_index.into_iter().map(|x| x.0).collect::<Vec<_>>();
+    let signatures = signatures_with_index
+        .into_iter()
+        .map(|x| x.0)
+        .collect::<Vec<_>>();
     let module_funcs = module.functions.borrow();
     let mut functions_with_index = module_funcs.iter().map(|x| x.1).collect::<Vec<_>>();
     functions_with_index.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-    let functions = functions_with_index.iter().map(|x| &x.1).collect::<Vec<_>>();
-
+    let functions = functions_with_index
+        .iter()
+        .map(|x| &x.1)
+        .collect::<Vec<_>>();
 
     writer.write(&[0x00, 0x61, 0x73, 0x6d])?; // WASM magic number
     writer.write(&[0x01, 0x00, 0x00, 0x00])?; // WASM binary version
@@ -178,7 +216,10 @@ pub fn compile_into_wasm<W: Write>(writer: &mut BufWriter<W>, source: &str) -> R
     write_function_section(writer, &functions)?;
     writer.flush()?;
 
-    write_export_section(writer, &module.exports.iter().map(|x| x).collect::<Vec<_>>())?;
+    write_export_section(
+        writer,
+        &module.exports.iter().map(|x| x).collect::<Vec<_>>(),
+    )?;
     writer.flush()?;
 
     write_code_section(writer, &functions)?;
@@ -205,8 +246,7 @@ mod tests {
             .unwrap();
         }
         assert_eq!(
-            buf,
-            vec![
+            buf,vec![
                 0x00, 0x61, 0x73, 0x6d, // wasm header
                 0x01, 0x00, 0x00, 0x00, // wasm binary version
                 0x01, // type section
@@ -214,10 +254,10 @@ mod tests {
                 0x01, // num types
                 0x60, // type func
                 0x02, // num params
-                0x6F, // f32
+                0x7D, // f32
                 0x7F, // i32
                 0x01, // num results
-                0x6F, // f32
+                0x7D, // f32
                 0x03, // function section
                 0x02, // section size
                 0x01, // num funcs

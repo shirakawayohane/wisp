@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::resolver::Type;
 
@@ -7,33 +7,72 @@ pub enum Pointer {
     Local(u8),
 }
 
-#[derive(Debug, PartialEq)]
-pub struct  Variable {
+#[derive(Debug, PartialEq, Clone)]
+pub struct Variable {
     pub pointer: Pointer,
-    pub t: Rc<Type>
+    pub t: Rc<Type>,
 }
 
 #[derive(Debug, PartialEq, Default)]
 pub struct Env {
-    parent: Option<Rc<Env>>,
+    parent: Option<Rc<RefCell<Env>>>,
     vars: HashMap<String, Variable>,
 }
 
 impl Env {
-    pub fn extend(parent: Rc<Self>) -> Env {
+    pub fn extend(parent: Rc<RefCell<Self>>) -> Env {
         Env {
             vars: HashMap::new(),
             parent: Some(parent),
         }
     }
-    pub fn get(&self, name: &str) -> Option<&Variable> {
+    pub fn get(&self, name: &str) -> Option<Variable> {
         match self.vars.get(name) {
-            Some(value) => Some(value),
-            None => self.parent.as_ref().and_then(|o| o.get(name)),
+            Some(value) => Some(value.clone()),
+            None => self
+                .parent
+                .as_ref()
+                .and_then(|o| (*o.clone()).borrow().get(name).clone()),
         }
     }
 
-    pub fn set(&mut self, name: &str, val: Variable) {
-        self.vars.insert(name.to_string(), val);
+    pub fn set(&mut self, name: &str, val: Variable) -> Option<Variable> {
+        self.vars.insert(name.to_string(), val)
+    }
+
+    pub fn count_local_vars(&self) -> usize {
+        let mut ret = self
+            .vars
+            .iter()
+            .filter(|(_, v)| {
+                match v.pointer {
+                    Pointer::Local(_) => true
+                }
+            })
+            .count();
+        if let Some(n) = self
+            .parent
+            .as_ref()
+            .and_then(|p| Some((*p.clone()).borrow().count_local_vars()))
+        {
+            ret += n;
+        }
+        ret
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    #[test]
+    fn test_count_local_vars() {
+        let env = Rc::new(RefCell::new(Env::default()));
+        env.borrow_mut().set("a", Variable { pointer: Pointer::Local(0), t: Rc::new(Type::I32) });
+        env.borrow_mut().set("b", Variable { pointer: Pointer::Local(1), t: Rc::new(Type::I32) });
+        let new_env = Rc::new(RefCell::new(Env::extend(env)));
+        new_env.borrow_mut().set("c", Variable { pointer: Pointer::Local(2), t: Rc::new(Type::I32) });
+        assert_eq!(new_env.borrow().count_local_vars(), 3);
     }
 }
