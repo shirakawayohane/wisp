@@ -1,6 +1,6 @@
 use std::{collections::HashMap, rc::Rc};
 
-use crate::{parser::TypeAST, emitter::PrimitiveType};
+use crate::{parser::TypeAST, emitter::WasmPrimitiveType};
 
 #[derive(Default, Debug)]
 pub struct TypeEnv {
@@ -23,13 +23,13 @@ pub fn resolve_type<'a>(t: &TypeAST, type_env: &TypeEnv) -> Rc<Type> {
     }
 }
 
-pub fn dissolve_type(t: Rc<Type>) -> Vec<PrimitiveType> {
+pub fn dissolve_type(t: Rc<Type>) -> Vec<WasmPrimitiveType> {
     match *t {
         Type::I32 => {
-            vec![PrimitiveType::I32]
+            vec![WasmPrimitiveType::I32]
         },
         Type::F32 => {
-            vec![PrimitiveType::F32]
+            vec![WasmPrimitiveType::F32]
         },
         Type::Unit => {
             vec![]

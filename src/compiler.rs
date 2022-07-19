@@ -1,5 +1,5 @@
 use crate::{
-    emitter::{Emitter, Export, ExportKind, Function, Module, OpCode, Signature, PrimitiveType},
+    emitter::{Emitter, Export, ExportKind, Function, Module, OpCode, Signature, WasmPrimitiveType},
     encoder::{encode_leb128, encode_s_leb128, encode_string},
 };
 use anyhow::{Result};
@@ -54,10 +54,10 @@ fn write_function_body(writer: &mut impl Write, func: &Function) -> Result<()> {
     for opcode in &func.body {
         match opcode {
             OpCode::LocalDecl(v) => match v {
-                PrimitiveType::I32 => {
+                WasmPrimitiveType::I32 => {
                     i32_locals += 1;
                 }
-                PrimitiveType::F32 => {
+                WasmPrimitiveType::F32 => {
                     f32_locals += 1;
                 }
             },

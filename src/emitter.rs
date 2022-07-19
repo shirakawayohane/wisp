@@ -17,7 +17,7 @@ pub enum ExportKind {
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
-pub enum PrimitiveType {
+pub enum WasmPrimitiveType {
     I32 = 0x7F,
     F32 = 0x7D
 }
@@ -37,8 +37,8 @@ pub enum SignatureType {
 #[derive(PartialEq, Eq, Debug, Hash, Clone)]
 pub struct Signature {
     pub sig_type: SignatureType,
-    pub params: Vec<PrimitiveType>,
-    pub results: Vec<PrimitiveType>,
+    pub params: Vec<WasmPrimitiveType>,
+    pub results: Vec<WasmPrimitiveType>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -55,7 +55,7 @@ pub enum OpCode {
     End,
     LocalGet(u8),
     LocalSet(u8),
-    LocalDecl(PrimitiveType),
+    LocalDecl(WasmPrimitiveType),
     Call(u32),
     I32Const(i32),
     F32Const(f32),
@@ -284,11 +284,11 @@ impl<'a> Emitter<'a> {
                             }
                             match value_type.borrow() {
                                 Type::F32 => {
-                                    codes.push(OpCode::LocalDecl(PrimitiveType::F32));
+                                    codes.push(OpCode::LocalDecl(WasmPrimitiveType::F32));
                                     codes.push(OpCode::LocalSet(local_index));
                                 }
                                 Type::I32 => {
-                                    codes.push(OpCode::LocalDecl(PrimitiveType::I32));
+                                    codes.push(OpCode::LocalDecl(WasmPrimitiveType::I32));
                                     codes.push(OpCode::LocalSet(local_index));
                                 }
                                 Type::Unit => bail!("hoge")
@@ -605,8 +605,8 @@ mod tests {
             *module.signatures.keys().next().unwrap(),
             Signature {
                 sig_type: SignatureType::Func,
-                params: vec![PrimitiveType::F32, PrimitiveType::I32],
-                results: vec![PrimitiveType::F32]
+                params: vec![WasmPrimitiveType::F32, WasmPrimitiveType::I32],
+                results: vec![WasmPrimitiveType::F32]
             }
         );
         let module_functions = module.functions.borrow_mut();
@@ -731,10 +731,10 @@ mod tests {
             module_functions["addTwo"].1.body,
             vec![
                 OpCode::I32Const(10),
-                OpCode::LocalDecl(PrimitiveType::I32),
+                OpCode::LocalDecl(WasmPrimitiveType::I32),
                 OpCode::LocalSet(0),
                 OpCode::I32Const(20),
-                OpCode::LocalDecl(PrimitiveType::I32),
+                OpCode::LocalDecl(WasmPrimitiveType::I32),
                 OpCode::LocalSet(1),
                 OpCode::LocalGet(0),
                 OpCode::LocalGet(1),
