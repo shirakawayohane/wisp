@@ -291,6 +291,10 @@ impl<'a> Emitter<'a> {
                                     codes.push(OpCode::LocalDecl(WasmPrimitiveType::I32));
                                     codes.push(OpCode::LocalSet(local_index));
                                 }
+                                Type::Bool => {
+                                    codes.push(OpCode::LocalDecl(WasmPrimitiveType::I32));
+                                    codes.push(OpCode::LocalSet(local_index));
+                                }
                                 Type::Unit => bail!("hoge")
                             }
                         },
@@ -412,6 +416,10 @@ impl<'a> Emitter<'a> {
                 } else {
                     bail!("Failed to parse number");
                 }
+            },
+            AST::BoolLiteral(b) => {
+                codes.push(OpCode::I32Const(if *b { 1 } else { 0 }));
+                return Ok(Rc::new(Type::Bool))
             }
             AST::Symbol(name) => match (*env.clone()).borrow().get(name) {
                 None => bail!("Symbol {} not found in this scope", name),
@@ -739,6 +747,23 @@ mod tests {
                 OpCode::LocalGet(0),
                 OpCode::LocalGet(1),
                 OpCode::I32Add,
+                OpCode::End
+            ]
+        )
+    }
+    #[test]
+    fn test_bool() {
+        let mut module = Module::default();
+        let mut emitter = Emitter::new(&mut module);
+        emitter.emit("
+        (defn get-true: bool []
+            true)
+        ").unwrap();
+        let functions = module.functions.borrow_mut();
+        assert_eq!(
+            functions["get-true"].1.body,
+            vec![
+                OpCode::I32Const(1),
                 OpCode::End
             ]
         )

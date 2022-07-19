@@ -5,6 +5,7 @@ use anyhow::{anyhow, Context, Result, ensure};
 pub enum TypeAST {
     I32,
     F32,
+    Bool,
     Unit,
 }
 
@@ -12,6 +13,7 @@ pub enum TypeAST {
 pub enum AST<'a> {
     Module(Vec<AST<'a>>),
     NumberLiteral(&'a str),
+    BoolLiteral(bool),
     Symbol(&'a str),
     SymbolWithAnnotation(&'a str, TypeAST),
     Add,
@@ -26,6 +28,7 @@ fn parse_type(tokens: &mut Vec<Token>) -> Result<TypeAST> {
     Ok(match tokens.pop() {
         Some(Token::Symbol("i32")) => TypeAST::I32,
         Some(Token::Symbol("f32")) => TypeAST::F32,
+        Some(Token::Symbol("bool")) => TypeAST::Bool,
         _ => todo!(),
     })
 }
@@ -57,6 +60,8 @@ pub fn parse<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
             Token::RParen => unreachable!(),
             Token::RBracket => unreachable!(),
             Token::Colon => unreachable!("Colon should be processed in Symbol arm"),
+            Token::True => AST::BoolLiteral(true),
+            Token::False => AST::BoolLiteral(false)
     })
 }
 
@@ -108,7 +113,6 @@ pub fn parse_source(source: &str) -> Result<AST> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_bin_ops() {
         let ast = parse_source(
@@ -140,6 +144,23 @@ mod tests {
                     ])
                 ])
             ])])
+        )
+    }
+    #[test]
+    fn test_bool() {
+        let ast = parse_source("
+        (defn get-true: bool [] true)
+        ").unwrap();
+        assert_eq!(
+            ast,
+            AST::Module(vec![
+                AST::List(vec![
+                    AST::Symbol("defn"),
+                    AST::SymbolWithAnnotation("get-true", TypeAST::Bool),
+                    AST::Vector(vec![]),
+                    AST::BoolLiteral(true)
+                ])
+            ])
         )
     }
 }

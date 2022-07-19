@@ -15,6 +15,8 @@ pub enum Token<'a> {
     LBracket,
     RBracket,
     Colon,
+    True,
+    False
 }
 
 impl<'a> Display for Token<'a> {
@@ -30,7 +32,9 @@ impl<'a> Display for Token<'a> {
             Token::RParen => write!(f, ")"),
             Token::LBracket => write!(f, "["),
             Token::RBracket => write!(f, "]"),
-            Token::Colon => write!(f, ":")
+            Token::Colon => write!(f, ":"),
+            Token::True => write!(f, "true"),
+            Token::False => write!(f, "false")
         }
     }
 }
@@ -74,6 +78,8 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>> {
                             .unwrap();
                         let name = &src[0..eaten];
                         match name {
+                            "true" => Token::True,
+                            "false" => Token::False,
                             _ => Token::Symbol(name),
                         }
                     }
