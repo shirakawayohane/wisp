@@ -1,6 +1,6 @@
 use std::{collections::HashMap, rc::Rc};
 
-use crate::{emitter::WasmPrimitiveType, parser::TypeAST};
+use crate::{emitter::{WasmPrimitiveType}, parser::TypeAST};
 
 #[derive(Default, Debug)]
 pub struct TypeEnv {
@@ -39,4 +39,3 @@ pub fn dissolve_type(t: Rc<Type>) -> Vec<WasmPrimitiveType> {
         }
     }
 }
-

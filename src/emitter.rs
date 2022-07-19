@@ -57,7 +57,8 @@ pub enum OpCode {
     I32Add,
     I32Sub,
     I32Mul,
-    I32Div,
+    I32DivS,
+    I32Xor,
     F32Add,
     F32Sub,
     F32Mul,
@@ -78,153 +79,124 @@ pub struct Emitter<'a> {
 }
 
 #[derive(Debug)]
-enum BinOp {
+enum IntrinsicOperator {
     Add,
     Sub,
     Mul,
     Div,
 }
 
-#[derive(Debug)]
-enum UnaryOp {
-    Minus,
-}
-
 impl<'a> Emitter<'a> {
     pub fn new(module: &'a mut Module) -> Self {
         Emitter { module }
     }
-    fn emit_unary_exp(
+    fn emit_intrinsic_exp(
         &mut self,
+        op: IntrinsicOperator,
         codes: &mut Vec<OpCode>,
-        op: UnaryOp,
-        operand: &AST,
+        args: &[AST],
         env: Rc<RefCell<Env>>,
-    ) -> Result<Type> {
-        let mut temp_vec = Vec::new();
-        let t = self.emit_obj(&mut temp_vec, operand, env)?;
-        match op {
-            UnaryOp::Minus => match *t {
-                Type::F32 => {
-                    temp_vec.push(OpCode::F32Neg);
-                    codes.append(&mut temp_vec);
-                    Ok(Type::F32)
+    ) -> Result<Rc<Type>> {
+        ensure!(args.len() > 0);
+        if args.len() == 1 {
+            let arg = &args[0];
+            match op {
+                IntrinsicOperator::Add => {
+                    match *self.emit_obj(codes, arg, env)? {
+                        Type::Bool | Type::Unit => bail!("Invalid argument for unary op. expected numeric type"),
+                        Type::I32 => Ok(Rc::new(Type::I32)),
+                        Type::F32 => Ok(Rc::new(Type::F32)),
+                    }
                 }
-                Type::I32 => {
-                    codes.push(OpCode::I32Const(0));
-                    codes.append(&mut temp_vec);
-                    codes.push(OpCode::I32Sub);
-                    Ok(Type::I32)
+                IntrinsicOperator::Sub => {
+                    match *self.emit_obj(codes, arg, env)? {
+                        Type::Bool | Type::Unit => bail!("Invalid argument for unary op. expected numeric type"),
+                        Type::I32 => {
+                            codes.push(OpCode::I32Const(-1));
+                            codes.push(OpCode::I32Xor);
+                            Ok(Rc::new(Type::I32))
+                        }
+                        Type::F32 => {
+                            codes.push(OpCode::F32Neg);
+                            Ok(Rc::new(Type::F32))
+                        }
+                    }
                 }
-                _ => bail!(
-                    "Unary expression: {:?} accepts only numeric types, but found {:?}",
-                    op,
-                    operand
-                ),
-            },
+                IntrinsicOperator::Mul => {
+                    match *self.emit_obj(codes, arg, env)? {
+                        Type::Bool | Type::Unit => bail!("Invalid argument for unary op. expected numeric type"),
+                        Type::I32 => Ok(Rc::new(Type::I32)),
+                        Type::F32 => Ok(Rc::new(Type::F32)),
+                    }
+                }
+                IntrinsicOperator::Div => {
+                    codes.push(OpCode::F32Const(1.0));
+                    match *self.emit_obj(codes, arg, env)? {
+                        Type::Bool | Type::Unit => bail!("Invalid argument for unary op. expected numeric type"),
+                        Type::I32 => {
+                            codes.push(OpCode::F32ConvertI32S);
+                            codes.push(OpCode::I32DivS);
+                            Ok(Rc::new(Type::I32))
+                        }
+                        Type::F32 => {
+                            codes.push(OpCode::F32Div);
+                            Ok(Rc::new(Type::F32))
+                        }
+                    }
+                }
+            }
+        } else {
+            let last_codes = codes;
+            let current_codes = &mut Vec::new();
+            let mut last_result = self.emit_obj(last_codes, &args[0], env.clone())?;
+            for arg in &args[1..] {
+                let current_result = self.emit_obj(current_codes, arg, env.clone())?;
+                let opcode = match *last_result {
+                    Type::Bool | Type::Unit => bail!("hoge"),
+                    Type::I32 => match *current_result {
+                        Type::Bool | Type::Unit => bail!("hoge"),
+                        Type::I32 => match op {
+                            IntrinsicOperator::Add => OpCode::I32Add,
+                            IntrinsicOperator::Sub => OpCode::I32Sub,
+                            IntrinsicOperator::Mul => OpCode::I32Mul,
+                            IntrinsicOperator::Div => OpCode::I32DivS,
+                        },
+                        Type::F32 => {
+                            last_codes.push(OpCode::F32ConvertI32S);
+                            last_result = current_result;
+                            match op {
+                                IntrinsicOperator::Add => OpCode::F32Add,
+                                IntrinsicOperator::Sub => OpCode::F32Sub,
+                                IntrinsicOperator::Mul => OpCode::F32Mul,
+                                IntrinsicOperator::Div => OpCode::F32Div,
+                            }
+                        }
+                    },
+                    Type::F32 => match *current_result {
+                        Type::Bool | Type::Unit => bail!("hoge"),
+                        Type::I32 => {
+                            current_codes.push(OpCode::F32ConvertI32S);
+                            match op {
+                                IntrinsicOperator::Add => OpCode::F32Add,
+                                IntrinsicOperator::Sub => OpCode::F32Sub,
+                                IntrinsicOperator::Mul => OpCode::F32Mul,
+                                IntrinsicOperator::Div => OpCode::F32Div,
+                            }
+                        }
+                        Type::F32 => match op {
+                            IntrinsicOperator::Add => OpCode::F32Add,
+                            IntrinsicOperator::Sub => OpCode::F32Sub,
+                            IntrinsicOperator::Mul => OpCode::F32Mul,
+                            IntrinsicOperator::Div => OpCode::F32Div,
+                        },
+                    },
+                };
+                dbg!(&last_result);
+                last_codes.append(current_codes);
+                last_codes.push(opcode);
+            }
+            Ok(last_result)
         }
-    }
-    fn emit_bin_exp(
-        &mut self,
-        codes: &mut Vec<OpCode>,
-        op: BinOp,
-        lhs: &AST,
-        rhs: &AST,
-        env: Rc<RefCell<Env>>,
-    ) -> Result<Type> {
-        let mut lhs_temp_vec = Vec::new();
-        let mut rhs_temp_vec = Vec::new();
-        let lhs_type = self.emit_obj(&mut lhs_temp_vec, lhs, env.clone())?;
-        let rhs_type = self.emit_obj(&mut rhs_temp_vec, rhs, env.clone())?;
-        let unsupported_msg = "";
-        let (opcode, result_type) = match op {
-            BinOp::Add => match *lhs_type {
-                Type::I32 => match *rhs_type {
-                    Type::F32 => {
-                        // cast lhs to f32
-                        lhs_temp_vec.push(OpCode::F32ConvertI32S);
-                        (OpCode::F32Add, Type::F32)
-                    }
-                    Type::I32 => (OpCode::I32Add, Type::I32),
-                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
-                },
-                Type::F32 => match *rhs_type {
-                    Type::I32 => {
-                        // cast rhs to f32
-                        rhs_temp_vec.push(OpCode::F32ConvertI32S);
-                        (OpCode::F32Add, Type::F32)
-                    }
-                    Type::F32 => (OpCode::F32Add, Type::F32),
-                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
-                },
-                _ => bail!(unsupported_msg)
-            },
-            BinOp::Sub => match *lhs_type {
-                Type::I32 => match *rhs_type {
-                    Type::F32 => {
-                        // cast lhs to f32
-                        lhs_temp_vec.push(OpCode::F32ConvertI32S);
-                        (OpCode::F32Sub, Type::F32)
-                    }
-                    Type::I32 => (OpCode::I32Sub, Type::I32),
-                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
-                },
-                Type::F32 => match *rhs_type {
-                    Type::I32 => {
-                        // cast rhs to f32
-                        rhs_temp_vec.push(OpCode::F32ConvertI32S);
-                        (OpCode::F32Sub, Type::F32)
-                    }
-                    Type::F32 => (OpCode::F32Sub, Type::F32),
-                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
-                },
-                _ => bail!("binary expression: {:?} accepts only numeric types, but first argument type is {:?}.", op, lhs_type)
-            },
-            BinOp::Mul => match *lhs_type {
-                Type::I32 => match *rhs_type {
-                    Type::F32 => {
-                        // cast lhs to f32
-                        lhs_temp_vec.push(OpCode::F32ConvertI32S);
-                        (OpCode::F32Mul, Type::F32)
-                    }
-                    Type::I32 => (OpCode::I32Mul, Type::I32),
-                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
-                },
-                Type::F32 => match *rhs_type {
-                    Type::F32 => (OpCode::F32Mul, Type::F32),
-                    Type::I32 => {
-                        rhs_temp_vec.push(OpCode::F32ConvertI32S);
-                        (OpCode::F32Mul, Type::F32)
-                    }
-                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
-                },
-                _ => bail!("binary expression: {:?} accepts only numeric types, but first argument type is {:?}.", op, lhs_type)
-            },
-            BinOp::Div => match *lhs_type {
-                Type::I32 => match *rhs_type {
-                    Type::F32 => {
-                        // cast lhs to f32
-                        lhs_temp_vec.push(OpCode::F32ConvertI32S);
-                        (OpCode::F32Div, Type::F32)
-                    }
-                    Type::I32 => (OpCode::I32Div, Type::I32),
-                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
-                },
-                Type::F32 => match *rhs_type {
-                    Type::F32 => (OpCode::F32Div, Type::F32),
-                    Type::I32 => {
-                        rhs_temp_vec.push(OpCode::F32ConvertI32S);
-                        (OpCode::F32Div, Type::F32)
-                    }
-                    _ => bail!("binary expression: {:?} accepts only numeric types, but second argument type is {:?}.", op, rhs_type)
-                },
-                _ => bail!("binary expression: {:?} accepts only numeric types, but first argument type is {:?}.", op, lhs_type)
-            },
-        };
-        codes.append(&mut lhs_temp_vec);
-        codes.append(&mut rhs_temp_vec);
-        codes.push(opcode);
-        Ok(result_type)
     }
     fn emit_function_call(
         &mut self,
@@ -342,38 +314,16 @@ impl<'a> Emitter<'a> {
             AST::List(list) => {
                 let first = &list[0];
                 Ok(match first {
-                    AST::Add | AST::Mul | AST::Div => {
-                        ensure!(
-                            list.len() == 3,
-                            "Binary op can only be evaluated with 2 args"
-                        );
-                        let result_type = self.emit_bin_exp(
-                            codes,
-                            match first {
-                                AST::Add => BinOp::Add,
-                                AST::Mul => BinOp::Mul,
-                                AST::Div => BinOp::Div,
-                                _ => unreachable!(),
-                            },
-                            &list[1],
-                            &list[2],
-                            env,
-                        )?;
-                        Rc::new(result_type)
+                    AST::Add | AST::Sub | AST::Mul | AST::Div => {
+                        let op = match first {
+                            AST::Add => IntrinsicOperator::Add,
+                            AST::Sub => IntrinsicOperator::Sub,
+                            AST::Mul => IntrinsicOperator::Mul,
+                            AST::Div => IntrinsicOperator::Div,
+                            _ => unreachable!()
+                        };
+                        self.emit_intrinsic_exp(op, codes, &list[1..], env)?
                     }
-                    AST::Sub => match &list.len() {
-                        2 => {
-                            let result_type =
-                                self.emit_unary_exp(codes, UnaryOp::Minus, &list[1], env)?;
-                            Rc::new(result_type)
-                        }
-                        3 => {
-                            let result_type =
-                                self.emit_bin_exp(codes, BinOp::Sub, &list[1], &list[2], env)?;
-                            Rc::new(result_type)
-                        }
-                        _ => bail!("- must be called with one or two arguments"),
-                    },
                     AST::Symbol(name) => {
                         match *name {
                             "let" => self.emit_let(codes, ast, env)?,
@@ -661,9 +611,9 @@ mod tests {
         assert_eq!(
             module_functions["neg_i32"].1.body,
             vec![
-                OpCode::I32Const(0),
                 OpCode::LocalGet(0),
-                OpCode::I32Sub,
+                OpCode::I32Const(-1),
+                OpCode::I32Xor,
                 OpCode::End
             ]
         )
