@@ -10,13 +10,21 @@ pub enum Token<'a> {
     Minus,
     Asterisk,
     Slash,
+    Eq,
+    Gt,
+    Ge,
+    Lt,
+    Le,
     LParen,
     RParen,
     LBracket,
     RBracket,
     Colon,
     True,
-    False
+    False,
+    And,
+    Or,
+    Not
 }
 
 impl<'a> Display for Token<'a> {
@@ -34,7 +42,15 @@ impl<'a> Display for Token<'a> {
             Token::RBracket => write!(f, "]"),
             Token::Colon => write!(f, ":"),
             Token::True => write!(f, "true"),
-            Token::False => write!(f, "false")
+            Token::False => write!(f, "false"),
+            Token::Eq => write!(f, "="),
+            Token::Gt => write!(f, ">"),
+            Token::Ge => write!(f, ">="),
+            Token::Lt => write!(f, "<"),
+            Token::Le => write!(f, "<="),
+            Token::And => write!(f, "and"),
+            Token::Or => write!(f, "or"),
+            Token::Not => write!(f, "not")
         }
     }
 }
@@ -65,6 +81,23 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>> {
                 '*' => Token::Asterisk,
                 '/' => Token::Slash,
                 ':' => Token::Colon,
+                '=' => Token::Eq,
+                '>' => {
+                    if src.starts_with(">=") {
+                        eaten = 2;
+                        Token::Ge
+                    } else {
+                        Token::Gt
+                    }
+                },
+                '<' => {
+                    if src.starts_with("<=") {
+                        eaten = 2;
+                        Token::Le
+                    } else {
+                        Token::Lt
+                    }
+                }
                 _ => {
                     if c.is_digit(10) {
                         eaten = src.find(|c: char| c != '.' && !c.is_digit(10)).unwrap();
@@ -80,6 +113,9 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>> {
                         match name {
                             "true" => Token::True,
                             "false" => Token::False,
+                            "and" => Token::And,
+                            "or" => Token::Or,
+                            "not" => Token::Not,
                             _ => Token::Symbol(name),
                         }
                     }
@@ -140,12 +176,70 @@ mod tests {
                 Token::RParen,
                 Token::RParen
             ]
-        )
+        );
+        let tokens = tokenize("
+            (or (and false (a < b))
+                (and true (a >= b)))").unwrap();
+        assert_eq!(tokens,
+        vec![
+            Token::LParen,
+            Token::Or,
+            Token::LParen,
+            Token::And,
+            Token::False,
+            Token::LParen,
+            Token::Symbol("a"),
+            Token::Lt,
+            Token::Symbol("b"),
+            Token::RParen,
+            Token::RParen,
+            Token::LParen,
+            Token::And,
+            Token::True,
+            Token::LParen,
+            Token::Symbol("a"),
+            Token::Ge,
+            Token::Symbol("b"),
+            Token::RParen,
+            Token::RParen,
+            Token::RParen,
+        ])
     }
 
     #[test]
     fn test_sub() {
         let tokens = tokenize("(- a 1)").unwrap();
         assert_eq!(tokens, vec![Token::LParen, Token::Minus, Token::Symbol("a"), Token::NumberLiteral("1"), Token::RParen])
+    }
+    #[test]
+    fn test_bool_ops() {
+        let tokens = tokenize("(and (> a b) (< a c) (>= a d) (<= a e))").unwrap();
+        assert_eq!(
+            tokens,
+        vec![
+            Token::LParen,
+            Token::Symbol("and"),
+            Token::LParen,
+            Token::Gt,
+            Token::Symbol("a"),
+            Token::Symbol("b"),
+            Token::RParen,
+            Token::LParen,
+            Token::Lt,
+            Token::Symbol("a"),
+            Token::Symbol("c"),
+            Token::RParen,
+            Token::LParen,
+            Token::Ge,
+            Token::Symbol("a"),
+            Token::Symbol("d"),
+            Token::RParen,
+            Token::LParen,
+            Token::Le,
+            Token::Symbol("a"),
+            Token::Symbol("e"),
+            Token::RParen,
+            Token::RParen,
+        ])
     }
 }

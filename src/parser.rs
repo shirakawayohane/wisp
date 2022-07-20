@@ -1,5 +1,5 @@
 use crate::lexer::{tokenize, Token};
-use anyhow::{anyhow, Context, Result, ensure};
+use anyhow::{anyhow, ensure, Context, Result};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeAST {
@@ -20,6 +20,14 @@ pub enum AST<'a> {
     Sub,
     Mul,
     Div,
+    Eq,
+    Gt,
+    Ge,
+    Lt,
+    Le,
+    And,
+    Or,
+    Not,
     List(Vec<AST<'a>>),
     Vector(Vec<AST<'a>>),
 }
@@ -34,34 +42,44 @@ fn parse_type(tokens: &mut Vec<Token>) -> Result<TypeAST> {
 }
 
 pub fn parse<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
-    let first_token = tokens.pop().with_context(|| "Parse error. Not enough tokens")?;
+    let first_token = tokens
+        .pop()
+        .with_context(|| "Parse error. Not enough tokens")?;
     Ok(match first_token {
-            Token::LParen => {
-                tokens.push(Token::LParen);
-                parse_list(tokens)?
-            },
-            Token::LBracket => {
-                tokens.push(Token::LBracket);
-                parse_vector(tokens)?
+        Token::LParen => {
+            tokens.push(Token::LParen);
+            parse_list(tokens)?
+        }
+        Token::LBracket => {
+            tokens.push(Token::LBracket);
+            parse_vector(tokens)?
+        }
+        Token::NumberLiteral(val) => AST::NumberLiteral(val),
+        Token::Plus => AST::Add,
+        Token::Minus => AST::Sub,
+        Token::Asterisk => AST::Mul,
+        Token::Slash => AST::Div,
+        Token::Eq => AST::Eq,
+        Token::Gt => AST::Gt,
+        Token::Ge => AST::Ge,
+        Token::Lt => AST::Lt,
+        Token::Le => AST::Le,
+        Token::Symbol(name) => {
+            if let Some(Token::Colon) = tokens.last() {
+                tokens.pop();
+                AST::SymbolWithAnnotation(name, parse_type(tokens)?)
+            } else {
+                AST::Symbol(name)
             }
-            Token::NumberLiteral(val) => AST::NumberLiteral(val),
-            Token::Plus => AST::Add,
-            Token::Minus => AST::Sub,
-            Token::Asterisk => AST::Mul,
-            Token::Slash => AST::Div,
-            Token::Symbol(name) => {
-                if let Some(Token::Colon) = tokens.last() {
-                    tokens.pop();
-                    AST::SymbolWithAnnotation(name, parse_type(tokens)?)
-                } else {
-                    AST::Symbol(name)
-                }
-            },
-            Token::RParen => unreachable!(),
-            Token::RBracket => unreachable!(),
-            Token::Colon => unreachable!("Colon should be processed in Symbol arm"),
-            Token::True => AST::BoolLiteral(true),
-            Token::False => AST::BoolLiteral(false)
+        }
+        Token::RParen => unreachable!(),
+        Token::RBracket => unreachable!(),
+        Token::Colon => unreachable!("Colon should be processed in Symbol arm"),
+        Token::True => AST::BoolLiteral(true),
+        Token::False => AST::BoolLiteral(false),
+        Token::And => AST::And,
+        Token::Or => AST::Or,
+        Token::Not => AST::Not
     })
 }
 
@@ -71,7 +89,12 @@ fn parse_sorrounded_by<'a>(
     close: Token,
 ) -> Result<Vec<AST<'a>>> {
     ensure!(tokens.len() > 0, "Parse error. Not enough tokens");
-    ensure!(tokens.last().unwrap() == &open, "Expected {} {}", open, tokens.last().unwrap());
+    ensure!(
+        tokens.last().unwrap() == &open,
+        "Expected {} {}",
+        open,
+        tokens.last().unwrap()
+    );
     tokens.pop();
     let mut nodes = Vec::new();
     while let Some(token) = tokens.last() {
@@ -86,11 +109,19 @@ fn parse_sorrounded_by<'a>(
 }
 
 fn parse_vector<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
-    Ok(AST::Vector(parse_sorrounded_by(tokens, Token::LBracket, Token::RBracket)?))
+    Ok(AST::Vector(parse_sorrounded_by(
+        tokens,
+        Token::LBracket,
+        Token::RBracket,
+    )?))
 }
 
 fn parse_list<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
-    Ok(AST::List(parse_sorrounded_by(tokens, Token::LParen, Token::RParen)?))
+    Ok(AST::List(parse_sorrounded_by(
+        tokens,
+        Token::LParen,
+        Token::RParen,
+    )?))
 }
 
 fn parse_module<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
@@ -148,19 +179,20 @@ mod tests {
     }
     #[test]
     fn test_bool() {
-        let ast = parse_source("
+        let ast = parse_source(
+            "
         (defn get-true: bool [] true)
-        ").unwrap();
+        ",
+        )
+        .unwrap();
         assert_eq!(
             ast,
-            AST::Module(vec![
-                AST::List(vec![
-                    AST::Symbol("defn"),
-                    AST::SymbolWithAnnotation("get-true", TypeAST::Bool),
-                    AST::Vector(vec![]),
-                    AST::BoolLiteral(true)
-                ])
-            ])
+            AST::Module(vec![AST::List(vec![
+                AST::Symbol("defn"),
+                AST::SymbolWithAnnotation("get-true", TypeAST::Bool),
+                AST::Vector(vec![]),
+                AST::BoolLiteral(true)
+            ])])
         )
     }
 }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc, fmt::Display};
 
 use crate::{emitter::{WasmPrimitiveType}, parser::TypeAST};
 
@@ -13,6 +13,17 @@ pub enum Type {
     F32,
     Bool,
     Unit,
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::I32 => write!(f, "i32"),
+            Type::F32 => write!(f, "f32"),
+            Type::Bool => write!(f, "bool"),
+            Type::Unit => write!(f, "()")
+        }
+    }
 }
 
 pub fn resolve_type<'a>(t: &TypeAST, type_env: &TypeEnv) -> Rc<Type> {
