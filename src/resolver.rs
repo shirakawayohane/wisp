@@ -37,16 +37,16 @@ pub fn resolve_type<'a>(t: &TypeAST, type_env: &TypeEnv) -> Rc<Type> {
     }
 }
 
-pub fn dissolve_type(t: Rc<Type>) -> Vec<WasmPrimitiveType> {
+pub fn get_primitive_types(t: Rc<Type>) -> Vec<Option<WasmPrimitiveType>> {
     match *t {
         Type::I32 | Type::Bool => {
-            vec![WasmPrimitiveType::I32]
+            vec![Some(WasmPrimitiveType::I32)]
         }
         Type::F32 => {
-            vec![WasmPrimitiveType::F32]
+            vec![Some(WasmPrimitiveType::F32)]
         }
         Type::Unit => {
-            vec![]
+            vec![None]
         }
     }
 }

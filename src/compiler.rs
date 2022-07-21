@@ -1,8 +1,10 @@
 use crate::{
-    emitter::{Emitter, Export, ExportKind, Function, Module, OpCode, Signature, WasmPrimitiveType},
+    emitter::{
+        Emitter, Export, ExportKind, Function, Module, OpCode, Signature, WasmPrimitiveType,
+    },
     encoder::{encode_leb128, encode_s_leb128, encode_string},
 };
-use anyhow::{Result};
+use anyhow::Result;
 use std::io::{BufWriter, Write};
 
 pub enum SectionCode {
@@ -67,7 +69,10 @@ fn write_function_body(writer: &mut impl Write, func: &Function) -> Result<()> {
         }
     }
     // First, bundle local decls.
-    let local_decl_count = [i32_locals > 0, f32_locals > 0].iter().filter(|x| **x).count();
+    let local_decl_count = [i32_locals > 0, f32_locals > 0]
+        .iter()
+        .filter(|x| **x)
+        .count();
     encode_leb128(writer, local_decl_count as u64)?;
     if i32_locals > 0 {
         encode_leb128(writer, i32_locals)?; // local type count
@@ -101,14 +106,25 @@ fn write_function_body(writer: &mut impl Write, func: &Function) -> Result<()> {
                 writer.write(&[0x10])?;
                 encode_leb128(writer, *index)?;
             }
+            OpCode::If(primitive_type) => {
+                writer.write(&[
+                    0x04,
+                    match *primitive_type {
+                        Some(pt) => pt as u8,
+                        None => 0x40,
+                    },
+                ])?;
+            }
             _ => {
                 writer.write(&[match opcode {
-                    OpCode::F32Const(_)
+                    OpCode::If(_)
+                    | OpCode::F32Const(_)
                     | OpCode::I32Const(_)
                     | OpCode::LocalGet(_)
                     | OpCode::LocalSet(_)
                     | OpCode::Call(_)
                     | OpCode::LocalDecl(_) => unreachable!(),
+                    OpCode::Else => 0x05,
                     OpCode::Drop => 0x1A,
                     OpCode::End => 0x0B,
                     OpCode::I32Eq => 0x46,
@@ -259,7 +275,8 @@ mod tests {
             .unwrap();
         }
         assert_eq!(
-            buf,vec![
+            buf,
+            vec![
                 0x00, 0x61, 0x73, 0x6d, // wasm header
                 0x01, 0x00, 0x00, 0x00, // wasm binary version
                 0x01, // type section

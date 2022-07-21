@@ -1,12 +1,10 @@
 use crate::{
     env::{Env, Pointer, Variable},
     parser::{parse_source, TypeAST, AST},
-    resolver::{dissolve_type, resolve_type, Type, TypeEnv},
+    resolver::{get_primitive_types, resolve_type, Type, TypeEnv},
 };
 use anyhow::{anyhow, bail, ensure, Context, Result};
-use std::{
-    borrow::Borrow, cell::RefCell, collections::HashMap, fmt::Display, hash::Hash, rc::Rc,
-};
+use std::{borrow::Borrow, cell::RefCell, collections::HashMap, fmt::Display, hash::Hash, rc::Rc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportKind {
@@ -48,6 +46,8 @@ pub struct Function {
 
 #[derive(PartialEq, Debug)]
 pub enum OpCode {
+    If(Option<WasmPrimitiveType>),
+    Else,
     Drop,
     End,
     LocalGet(u8),
@@ -110,20 +110,24 @@ enum IntrinsicOperator {
 
 impl Display for IntrinsicOperator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", match self {
-            IntrinsicOperator::Add => "+",
-            IntrinsicOperator::Sub => "-",
-            IntrinsicOperator::Mul => "*",
-            IntrinsicOperator::Div => "/",
-            IntrinsicOperator::Eq => "=",
-            IntrinsicOperator::Gt => ">",
-            IntrinsicOperator::Ge => ">=",
-            IntrinsicOperator::Lt => "<",
-            IntrinsicOperator::Le => "<=",
-            IntrinsicOperator::And => "and",
-            IntrinsicOperator::Or => "or",
-            IntrinsicOperator::Not => "not",
-        })
+        write!(
+            f,
+            "{}",
+            match self {
+                IntrinsicOperator::Add => "+",
+                IntrinsicOperator::Sub => "-",
+                IntrinsicOperator::Mul => "*",
+                IntrinsicOperator::Div => "/",
+                IntrinsicOperator::Eq => "=",
+                IntrinsicOperator::Gt => ">",
+                IntrinsicOperator::Ge => ">=",
+                IntrinsicOperator::Lt => "<",
+                IntrinsicOperator::Le => "<=",
+                IntrinsicOperator::And => "and",
+                IntrinsicOperator::Or => "or",
+                IntrinsicOperator::Not => "not",
+            }
+        )
     }
 }
 
@@ -376,7 +380,10 @@ impl<'a> Emitter<'a> {
                 return Ok(result_type);
             } else {
                 let emitted_type = self.emit_obj(codes, &form, env.clone())?;
-                let stack_cnt = dissolve_type(emitted_type).len();
+                let stack_cnt = get_primitive_types(emitted_type)
+                    .iter()
+                    .filter(|x| x.is_some())
+                    .count();
                 // Drop unused results
                 for _ in 0..stack_cnt {
                     codes.push(OpCode::Drop);
@@ -396,7 +403,7 @@ impl<'a> Emitter<'a> {
             ensure!(slice.len() > 2);
             let (binding_vector, forms) = match &slice[0] {
                 AST::Symbol("let") => (&slice[1], &slice[2..]),
-                _ => bail!("hoge"),
+                _ => unreachable!(),
             };
             if let AST::Vector(bindings) = binding_vector {
                 ensure!(
@@ -455,6 +462,55 @@ impl<'a> Emitter<'a> {
             unreachable!()
         }
     }
+    fn emit_if(
+        &mut self,
+        codes: &mut Vec<OpCode>,
+        ast: &AST,
+        env: Rc<RefCell<Env>>,
+    ) -> Result<Rc<Type>> {
+        let forms = match ast {
+            AST::List(forms) => {
+                ensure!(
+                    forms.len() == 4,
+                    "if expects just 3 forms, found {}",
+                    forms.len()
+                );
+                ensure!(*forms.first().unwrap() == AST::Symbol("if"));
+                &forms[1..]
+            }
+            _ => unreachable!(),
+        };
+        let bool_exp = &forms[0];
+        let true_exp = &forms[1];
+        let false_exp = &forms[2];
+        ensure!(
+            *self.emit_obj(codes, bool_exp, env.clone())? == Type::Bool,
+            "first form of if must be bool expression"
+        );
+        let temp_codes = &mut Vec::new();
+        let true_form_type = self.emit_obj(temp_codes, true_exp, env.clone())?;
+        temp_codes.push(OpCode::Else);
+        let false_form_type = self.emit_obj(temp_codes, false_exp, env.clone())?;
+        
+        // ToDo: Improve flexibility
+        ensure!(
+            *true_form_type == *false_form_type,
+            "mismatched types. found {} and {}",
+            true_form_type,
+            false_form_type
+        );
+
+        let primitive_type = get_primitive_types(true_form_type.clone());
+        if primitive_type.len() != 1 {
+            unimplemented!("tuple is not implemented");
+        }
+        codes.push(OpCode::If(
+            *get_primitive_types(true_form_type.clone()).first().unwrap(),
+        ));
+        codes.append(temp_codes);
+        codes.push(OpCode::End);
+        Ok(true_form_type.clone())
+    }
     fn emit_list(
         &mut self,
         codes: &mut Vec<OpCode>,
@@ -498,6 +554,7 @@ impl<'a> Emitter<'a> {
                     AST::Symbol(name) => {
                         match *name {
                             "let" => self.emit_let(codes, ast, env)?,
+                            "if" => self.emit_if(codes, ast, env)?,
                             _ => {
                                 // emit function call
                                 let module_functions = self.module.functions.clone();
@@ -636,8 +693,8 @@ impl<'a> Emitter<'a> {
             let scope_result_type = self.emit_scope(&mut func_body, &forms, new_env)?;
 
             if *result_type == Type::Unit {
-                let stack_cnt = dissolve_type(scope_result_type).len();
-                // Drop unused results
+                let stack_cnt = get_primitive_types(scope_result_type).len();
+                // Drop unused result
                 for _ in 0..stack_cnt {
                     func_body.push(OpCode::Drop);
                 }
@@ -656,9 +713,19 @@ impl<'a> Emitter<'a> {
                 sig_type: SignatureType::Func,
                 params: arg_types
                     .iter()
-                    .flat_map(|types| dissolve_type(types.clone()))
+                    .flat_map(|types| {
+                        get_primitive_types(types.clone())
+                            .iter()
+                            .filter(|x| x.is_some())
+                            .map(|x| x.unwrap())
+                            .collect::<Vec<_>>()
+                    })
                     .collect::<Vec<_>>(),
-                results: dissolve_type(resolve_type(result_type_ast, &empty_type_env)),
+                results: get_primitive_types(resolve_type(result_type_ast, &empty_type_env))
+                    .iter()
+                    .filter(|x| x.is_some())
+                    .map(|x| x.unwrap())
+                    .collect(),
             };
             let signature_index = match self.module.signatures.get(&signature) {
                 Some(index) => *index,
@@ -1076,5 +1143,58 @@ mod tests {
                 OpCode::End
             ]
         );
+    }
+    #[test]
+    fn test_if() {
+        let mut module = Module::default();
+        let mut emitter = Emitter::new(&mut module);
+        emitter
+            .emit(
+                "
+        (defn check-if: i32 []
+            (if true
+                1
+                2))
+        (defn check-if-2: f32 []
+            (if false
+                1.0
+                2.0))
+        (defn check-if-3: bool []
+            (if (> 2 1)
+                true
+                false))
+        ",
+            )
+            .unwrap();
+        let functions = module.functions.borrow_mut();
+        assert_eq!(functions["check-if"].1.body, vec![
+            OpCode::I32Const(1),
+            OpCode::If(Some(WasmPrimitiveType::I32)),
+            OpCode::I32Const(1),
+            OpCode::Else,
+            OpCode::I32Const(2),
+            OpCode::End,
+            OpCode::End
+        ]);
+        assert_eq!(functions["check-if-2"].1.body, vec![
+            OpCode::I32Const(0),
+            OpCode::If(Some(WasmPrimitiveType::F32)),
+            OpCode::F32Const(1.0),
+            OpCode::Else,
+            OpCode::F32Const(2.0),
+            OpCode::End,
+            OpCode::End
+        ]);
+        assert_eq!(functions["check-if-3"].1.body, vec![
+            OpCode::I32Const(2),
+            OpCode::I32Const(1),
+            OpCode::I32GtS,
+            OpCode::If(Some(WasmPrimitiveType::I32)),
+            OpCode::I32Const(1),
+            OpCode::Else,
+            OpCode::I32Const(0),
+            OpCode::End,
+            OpCode::End
+        ]);
     }
 }
