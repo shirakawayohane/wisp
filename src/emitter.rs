@@ -720,18 +720,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_bin_ops() {
+    fn test_arithmetic_ops() {
         let mut module: Module = Module::default();
         let mut emitter = Emitter::new(&mut module);
         emitter
             .emit(
                 "(defn calc : f32
                     [a : f32 b : i32]
-                        (* 10 (/ (+ a (- b 1)) 2)))",
+                        (* 10 (/ (+ a (- b 1)) 2)))
+                        
+                    (defn sum: f32 []
+                        (+ 10 20 30.0))
+                    (defn sub: f32 []
+                        (- 10.0 20 30))
+                    (defn mul: f32 []
+                        (* 10 20.0 30))
+                    (defn div: f32 []
+                        (/ 10 20 30.0))",
             )
             .unwrap();
         assert_eq!(module.exports, []);
-        assert_eq!(module.signatures.len(), 1);
+        assert_eq!(module.signatures.len(), 2);
         assert_eq!(
             *module.signatures.keys().next().unwrap(),
             Signature {
@@ -763,6 +772,56 @@ mod tests {
                     OpCode::End
                 ]
             }
+        );
+        assert_eq!(
+            module_functions["sum"].1.body,
+            vec![
+                OpCode::I32Const(10),
+                OpCode::I32Const(20),
+                OpCode::I32Add,
+                OpCode::F32ConvertI32S,
+                OpCode::F32Const(30.0),
+                OpCode::F32Add,
+                OpCode::End
+            ]
+        );
+        assert_eq!(
+            module_functions["sub"].1.body,
+            vec![
+                OpCode::F32Const(10.0),
+                OpCode::I32Const(20),
+                OpCode::F32ConvertI32S,
+                OpCode::F32Sub,
+                OpCode::I32Const(30),
+                OpCode::F32ConvertI32S,
+                OpCode::F32Sub,
+                OpCode::End
+            ]
+        );
+        assert_eq!(
+            module_functions["mul"].1.body,
+            vec![
+                OpCode::I32Const(10),
+                OpCode::F32ConvertI32S,
+                OpCode::F32Const(20.0),
+                OpCode::F32Mul,
+                OpCode::I32Const(30),
+                OpCode::F32ConvertI32S,
+                OpCode::F32Mul,
+                OpCode::End
+            ]
+        );
+        assert_eq!(
+            module_functions["div"].1.body,
+            vec![
+                OpCode::I32Const(10),
+                OpCode::I32Const(20),
+                OpCode::I32DivS,
+                OpCode::F32ConvertI32S,
+                OpCode::F32Const(30.0),
+                OpCode::F32Div,
+                OpCode::End
+            ]
         )
     }
     #[test]
