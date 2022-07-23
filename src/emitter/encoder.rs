@@ -54,7 +54,7 @@ fn encode_global_section(writer: &mut impl Write, globals: &[&Global]) -> Result
     Ok(())
 }
 
-fn write_signature<W: Write>(writer: &mut W, signature: &Signature) -> Result<()> {
+fn encode_signature<W: Write>(writer: &mut W, signature: &Signature) -> Result<()> {
     // signature type
     writer.write(&[signature.sig_type as u8])?;
     // num params
@@ -80,7 +80,7 @@ fn write_signature<W: Write>(writer: &mut W, signature: &Signature) -> Result<()
     Ok(())
 }
 
-fn write_export(writer: &mut impl Write, export: &Export) -> Result<()> {
+fn encode_export(writer: &mut impl Write, export: &Export) -> Result<()> {
     encode_string(writer, &export.name)?;
     writer.write(&[match export.export_type {
         ExportKind::Func => 0x00,
@@ -89,7 +89,7 @@ fn write_export(writer: &mut impl Write, export: &Export) -> Result<()> {
     Ok(())
 }
 
-fn write_function_body(writer: &mut impl Write, func: &Function) -> Result<()> {
+fn encode_function_body(writer: &mut impl Write, func: &Function) -> Result<()> {
     let mut i32_locals: u8 = 0;
     let mut f32_locals: u8 = 0;
     let mut opcodes = Vec::new();
@@ -207,13 +207,13 @@ fn write_function_body(writer: &mut impl Write, func: &Function) -> Result<()> {
     Ok(())
 }
 
-fn write_type_section(writer: &mut impl Write, signatures: Vec<&Signature>) -> Result<()> {
+fn encode_type_section(writer: &mut impl Write, signatures: Vec<&Signature>) -> Result<()> {
     writer.write(&[0x01])?; // section Type: 1
     let mut type_section = Vec::new();
     // write num type signatures
     encode_leb128(&mut type_section, signatures.len() as u64)?;
     for signature in signatures {
-        write_signature(&mut type_section, &signature)?;
+        encode_signature(&mut type_section, &signature)?;
     }
     encode_leb128(writer, type_section.len() as u64)?; // section size
     writer.write(&type_section[..])?;
@@ -221,7 +221,7 @@ fn write_type_section(writer: &mut impl Write, signatures: Vec<&Signature>) -> R
     Ok(())
 }
 
-fn write_function_section(writer: &mut impl Write, functions: &Vec<&Function>) -> Result<()> {
+fn encode_function_section(writer: &mut impl Write, functions: &Vec<&Function>) -> Result<()> {
     writer.write(&[0x03])?; // section function: 3
     let mut func_section = Vec::new();
     let num_functions = functions.len();
@@ -235,13 +235,13 @@ fn write_function_section(writer: &mut impl Write, functions: &Vec<&Function>) -
     Ok(())
 }
 
-fn write_export_section(writer: &mut impl Write, exports: &Vec<&Export>) -> Result<()> {
+fn encode_export_section(writer: &mut impl Write, exports: &Vec<&Export>) -> Result<()> {
     writer.write(&[0x07])?; // section function: 7
     let mut export_section = Vec::new();
     let num_exports = exports.len();
     encode_leb128(&mut export_section, num_exports as u64)?;
     for export in exports {
-        write_export(&mut export_section, &export)?;
+        encode_export(&mut export_section, &export)?;
     }
     let section_size = export_section.len();
     encode_leb128(writer, section_size as u64)?;
@@ -249,14 +249,14 @@ fn write_export_section(writer: &mut impl Write, exports: &Vec<&Export>) -> Resu
     Ok(())
 }
 
-fn write_code_section(writer: &mut impl Write, functions: &Vec<&Function>) -> Result<()> {
+fn encode_code_section(writer: &mut impl Write, functions: &Vec<&Function>) -> Result<()> {
     writer.write(&[0x0A])?; // section code: 10
     let mut code_section = Vec::new();
     let num_functions = functions.len();
     encode_leb128(&mut code_section, num_functions as u64)?;
     for func in functions {
         let mut func_body_bytes = Vec::new();
-        write_function_body(&mut func_body_bytes, func)?;
+        encode_function_body(&mut func_body_bytes, func)?;
         // write func body size
         encode_leb128(&mut code_section, func_body_bytes.len() as u64)?;
         code_section.write(&func_body_bytes)?;
@@ -288,10 +288,10 @@ pub fn compile_into_wasm<W: Write>(writer: &mut BufWriter<W>, source: &str) -> R
     writer.write(&[0x00, 0x61, 0x73, 0x6d])?; // WASM magic number
     writer.write(&[0x01, 0x00, 0x00, 0x00])?; // WASM binary version
 
-    write_type_section(writer, signatures)?;
+    encode_type_section(writer, signatures)?;
     writer.flush()?;
 
-    write_function_section(writer, &functions)?;
+    encode_function_section(writer, &functions)?;
     writer.flush()?;
 
     let module_globals = module.globals.borrow();
@@ -300,13 +300,13 @@ pub fn compile_into_wasm<W: Write>(writer: &mut BufWriter<W>, source: &str) -> R
     let globals = globals_with_index.iter().map(|x| &x.1).collect::<Vec<_>>();
     encode_global_section(writer, &globals)?;
 
-    write_export_section(
+    encode_export_section(
         writer,
         &module.exports.iter().map(|x| x).collect::<Vec<_>>(),
     )?;
     writer.flush()?;
 
-    write_code_section(writer, &functions)?;
+    encode_code_section(writer, &functions)?;
     writer.flush()?;
 
     Ok(())
