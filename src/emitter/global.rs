@@ -1,6 +1,6 @@
 use super::*;
 use crate::{env::Env, parser::AST, resolver::Type};
-use anyhow::{bail, ensure, Result, Context};
+use anyhow::{bail, ensure, Context, Result};
 use std::{cell::RefCell, rc::Rc};
 
 pub(super) fn emit_global(
@@ -18,17 +18,25 @@ pub(super) fn emit_global(
 
     // TODO: Impl type symbol functionality
     let empty_type_env = TypeEnv::default();
-    let resolved_type = resolve_type(t, &empty_type_env);
+    let resolved_type = resolve_type(t, &empty_type_env)?;
     let mut globals = module.globals.borrow_mut();
-    let index = globals.len();
+    let index = globals.len() as u32;
 
     let value = match *resolved_type {
         Type::I32 => match value_ast {
-            AST::NumberLiteral(numstr) => GlobalValue::I32(numstr.parse::<i32>().with_context(|| format!("failed to parse number"))?),
+            AST::NumberLiteral(numstr) => GlobalValue::I32(
+                numstr
+                    .parse::<i32>()
+                    .with_context(|| format!("failed to parse number"))?,
+            ),
             _ => bail!("number literal expected"),
         },
         Type::F32 => match value_ast {
-            AST::NumberLiteral(numstr) => GlobalValue::F32(numstr.parse::<f32>().with_context(|| format!("failed to parse nubmer"))?),
+            AST::NumberLiteral(numstr) => GlobalValue::F32(
+                numstr
+                    .parse::<f32>()
+                    .with_context(|| format!("failed to parse nubmer"))?,
+            ),
             _ => bail!("number literal expected"),
         },
         Type::Bool => match value_ast {
@@ -36,10 +44,17 @@ pub(super) fn emit_global(
             _ => bail!("bool literal expected"),
         },
         Type::Unit => bail!("Only primitive literals are supported for global variable for now"),
+        Type::Array(_) => todo!(),
     };
     globals.insert(name.to_string(), (index, Global { is_mutable, value }));
 
-    env.borrow_mut().set(name, Variable { pointer: Pointer::Global(index as u32), t: resolved_type });
+    env.borrow_mut().set(
+        name,
+        Variable {
+            pointer: Pointer::Global(index as u32),
+            t: resolved_type,
+        },
+    );
 
     Ok(())
 }
@@ -63,84 +78,61 @@ mod tests {
         emit(module, source).unwrap();
         let globals = module.globals.borrow();
         assert_eq!(
-            globals["num"],
-            (
-                0,
-                Global {
-                    is_mutable: false,
-                    value: GlobalValue::I32(10)
-                }
-            )
+            globals["num"].1,
+            Global {
+                is_mutable: false,
+                value: GlobalValue::I32(10)
+            }
         );
         assert_eq!(
-            globals["num2"],
-            (
-                1,
-                Global {
-                    is_mutable: false,
-                    value: GlobalValue::F32(10.0)
-                }
-            )
+            globals["num2"].1,
+            Global {
+                is_mutable: false,
+                value: GlobalValue::F32(10.0)
+            }
         );
         assert_eq!(
-            globals["bool"],
-            (
-                2,
-                Global {
-                    is_mutable: false,
-                    value: GlobalValue::I32(1)
-                }
-            )
+            globals["bool"].1,
+            Global {
+                is_mutable: false,
+                value: GlobalValue::I32(1)
+            }
         );
         assert_eq!(
-            globals["bool2"],
-            (
-                3,
-                Global {
-                    is_mutable: false,
-                    value: GlobalValue::I32(0)
-                }
-            )
+            globals["bool2"].1,
+            Global {
+                is_mutable: false,
+                value: GlobalValue::I32(0)
+            }
         );
         assert_eq!(
-            globals["num_mut"],
-            (
-                4,
-                Global {
-                    is_mutable: true,
-                    value: GlobalValue::I32(10)
-                }
-            )
+            globals["num_mut"].1,
+            Global {
+                is_mutable: true,
+                value: GlobalValue::I32(10)
+            }
+            
         );
         assert_eq!(
-            globals["num2_mut"],
-            (
-                5,
-                Global {
-                    is_mutable: true,
-                    value: GlobalValue::F32(10.0)
-                }
-            )
+            globals["num2_mut"].1,
+            Global {
+                is_mutable: true,
+                value: GlobalValue::F32(10.0)
+            }
         );
         assert_eq!(
-            globals["bool_mut"],
-            (
-                6,
-                Global {
-                    is_mutable: true,
-                    value: GlobalValue::I32(1)
-                }
-            )
+            globals["bool_mut"].1,
+            Global {
+                is_mutable: true,
+                value: GlobalValue::I32(1)
+            }
         );
         assert_eq!(
-            globals["bool2_mut"],
-            (
-                7,
-                Global {
-                    is_mutable: true,
-                    value: GlobalValue::I32(0)
-                }
-            )
+            globals["bool2_mut"].1,
+            Global {
+                is_mutable: true,
+                value: GlobalValue::I32(0)
+            }
         );
     }
 
@@ -148,10 +140,16 @@ mod tests {
     fn test_env() {
         let module = &mut Module::default();
         let env = Env::create();
-        emit_global(module, &[
-            AST::SymbolWithAnnotation("hoge", TypeAST::I32),
-            AST::NumberLiteral("10")
-        ], false, env.clone()).unwrap();
+        emit_global(
+            module,
+            &[
+                AST::SymbolWithAnnotation("hoge", TypeAST::I32),
+                AST::NumberLiteral("10"),
+            ],
+            false,
+            env.clone(),
+        )
+        .unwrap();
         let hoge = env.borrow().get("hoge").unwrap();
         assert_eq!(
             hoge,
@@ -173,12 +171,10 @@ mod tests {
         let mut module = Module::default();
         emit(&mut module, source).unwrap();
         let functions = module.functions.borrow_mut();
+        let globals = module.globals.borrow();
         assert_eq!(
             functions["get-global"].1.body,
-            vec![
-                OpCode::GlobalGet(0),
-                OpCode::End
-            ]
+            vec![OpCode::GlobalGet(globals["num"].0), OpCode::End]
         )
     }
 }
