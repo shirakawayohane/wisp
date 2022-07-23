@@ -1,3 +1,4 @@
+use super::*;
 use std::io::Write;
 
 pub fn encode_leb128<N: Into<u64>>(writer: &mut impl Write, n: N) -> Result<usize, std::io::Error> {
@@ -23,11 +24,34 @@ use crate::emitter::{
 use anyhow::Result;
 use std::io::BufWriter;
 
-pub enum SectionCode {
-    Type = 0x01,
-    Function = 0x03,
-    Export = 0x07,
-    Code = 0x0a,
+fn encode_global(writer: &mut impl Write, global: &Global) -> Result<()> {
+    let primitive_type = match global.value {
+        GlobalValue::I32(_) => WasmPrimitiveType::I32,
+        GlobalValue::F32(_) => WasmPrimitiveType::F32,
+    };
+    writer.write(&[primitive_type as u8, if global.is_mutable { 1 } else { 0 }])?;
+    match global.value {
+        GlobalValue::I32(v) => {
+            encode_leb128(writer, v as u64)?;
+        }
+        GlobalValue::F32(v) => {
+            writer.write(&v.to_le_bytes())?;
+        }
+    }
+    writer.write(&[0x0B])?; // end
+    Ok(())
+}
+
+fn encode_global_section(writer: &mut impl Write, globals: &[&Global]) -> Result<()> {
+    writer.write(&[0x06])?;
+    let global_section = &mut Vec::new();
+    encode_leb128(global_section, globals.len() as u64)?;
+    for global in globals {
+        encode_global(writer, global)?;
+    }
+    encode_leb128(writer, global_section.len() as u64)?;
+    writer.write(global_section)?;
+    Ok(())
 }
 
 fn write_signature<W: Write>(writer: &mut W, signature: &Signature) -> Result<()> {
@@ -174,7 +198,7 @@ fn write_function_body(writer: &mut impl Write, func: &Function) -> Result<()> {
 }
 
 fn write_type_section(writer: &mut impl Write, signatures: Vec<&Signature>) -> Result<()> {
-    writer.write(&[SectionCode::Type as u8])?;
+    writer.write(&[0x01])?; // section Type: 1
     let mut type_section = Vec::new();
     // write num type signatures
     encode_leb128(&mut type_section, signatures.len() as u64)?;
@@ -188,7 +212,7 @@ fn write_type_section(writer: &mut impl Write, signatures: Vec<&Signature>) -> R
 }
 
 fn write_function_section(writer: &mut impl Write, functions: &Vec<&Function>) -> Result<()> {
-    writer.write(&[SectionCode::Function as u8])?;
+    writer.write(&[0x03])?; // section function: 3
     let mut func_section = Vec::new();
     let num_functions = functions.len();
     encode_leb128(&mut func_section, num_functions as u64)?;
@@ -202,7 +226,7 @@ fn write_function_section(writer: &mut impl Write, functions: &Vec<&Function>) -
 }
 
 fn write_export_section(writer: &mut impl Write, exports: &Vec<&Export>) -> Result<()> {
-    writer.write(&[SectionCode::Export as u8])?;
+    writer.write(&[0x07])?; // section function: 7
     let mut export_section = Vec::new();
     let num_exports = exports.len();
     encode_leb128(&mut export_section, num_exports as u64)?;
@@ -216,7 +240,7 @@ fn write_export_section(writer: &mut impl Write, exports: &Vec<&Export>) -> Resu
 }
 
 fn write_code_section(writer: &mut impl Write, functions: &Vec<&Function>) -> Result<()> {
-    writer.write(&[SectionCode::Code as u8])?;
+    writer.write(&[0x0A])?; // section code: 10
     let mut code_section = Vec::new();
     let num_functions = functions.len();
     encode_leb128(&mut code_section, num_functions as u64)?;
@@ -259,6 +283,12 @@ pub fn compile_into_wasm<W: Write>(writer: &mut BufWriter<W>, source: &str) -> R
 
     write_function_section(writer, &functions)?;
     writer.flush()?;
+
+    let module_globals = module.globals.borrow();
+    let mut globals_with_index = module_globals.iter().map(|x| x.1).collect::<Vec<_>>();
+    globals_with_index.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    let globals = globals_with_index.iter().map(|x| &x.1).collect::<Vec<_>>();
+    encode_global_section(writer, &globals)?;
 
     write_export_section(
         writer,
@@ -369,6 +399,9 @@ mod tests {
                 0x02, // section size
                 0x01, // num funcs
                 0x00, // signature index
+                0x06, // global section
+                0x01, // section size
+                0x00, // num globals
                 0x07, // export section
                 0x01, // section size,
                 0x00, // num exports

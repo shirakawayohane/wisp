@@ -1,8 +1,9 @@
+pub mod encoder;
+mod expression;
+mod function;
 mod intrinsic_ops;
 mod special_forms;
-mod function;
-mod expression;
-pub mod encoder;
+mod global;
 
 pub use encoder::compile_into_wasm;
 
@@ -12,10 +13,10 @@ use crate::{
     resolver::{get_primitive_types, resolve_type, Type, TypeEnv},
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use std::{cell::RefCell, collections::HashMap, fmt::Display, hash::Hash, rc::Rc};
 
-use self::{special_forms::{emit_scope}, function::emit_func};
+use self::{function::*, special_forms::*, global::*};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportKind {
@@ -55,6 +56,18 @@ pub struct Function {
     pub body: Vec<OpCode>,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum GlobalValue {
+    I32(i32),
+    F32(f32),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Global {
+    is_mutable: bool,
+    value: GlobalValue,
+}
+
 #[derive(PartialEq, Debug)]
 pub enum OpCode {
     If(Option<WasmPrimitiveType>),
@@ -92,11 +105,12 @@ pub enum OpCode {
     F32ConvertI32S,
 }
 
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, Default)]
 pub struct Module {
     pub signatures: HashMap<Signature, u16>,
     pub exports: Vec<Export>,
     pub functions: Rc<RefCell<HashMap<String, (usize, Function)>>>,
+    pub globals: Rc<RefCell<HashMap<String, (usize, Global)>>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -138,18 +152,29 @@ impl Display for IntrinsicOperator {
     }
 }
 
-fn emit_toplevel(module: &mut Module, ast: &AST) -> Result<()> {
-    // TODO: Impl Global Variables
-    // toplevel can only be a function for now.
-    emit_func(module, ast, Rc::new(RefCell::new(Env::default())))
+fn emit_toplevel(module: &mut Module, ast: &AST, env: Rc<RefCell<Env>>) -> Result<()> {
+    match ast {
+        AST::List(list) => match list.first().unwrap() {
+            AST::Symbol(s) => match *s {
+                "defn" | "export" => emit_func(module, ast, env),
+                "define" => emit_global(module, &list[1..], false, env),
+                "defmut" => emit_global(module, &list[1..], true, env),
+                _ => bail!("Top level form must be function decl or global variable, found {:?}", s),
+            },
+            _ => bail!("Top level form must be function decl or global variable, found {:?}", ast),
+        },
+        _ => bail!("Toplevel form must be a list"),
+    }
 }
+
 fn emit_module(module: &mut Module, ast: &AST) -> Result<()> {
+    let env = Rc::new(RefCell::new(Env::default()));
     let toplevels = match ast {
         AST::Module(tops) => tops,
         _ => return Err(anyhow!("Invalid argument.")),
     };
     for toplevel in toplevels {
-        emit_toplevel(module, toplevel)?;
+        emit_toplevel(module, toplevel, env.clone())?;
     }
     Ok(())
 }

@@ -2,6 +2,9 @@
     (let [c 30]
         (+ c (+ a b))))
 
+(define GlobalNumber: i32
+    10)
+
 (defn middle : i32
     [a: i32 b: i32 c: i32]
     (if (> a b c)

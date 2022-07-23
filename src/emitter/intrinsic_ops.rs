@@ -245,14 +245,6 @@ mod tests {
         .unwrap();
         assert_eq!(module.exports, []);
         assert_eq!(module.signatures.len(), 2);
-        assert_eq!(
-            *module.signatures.keys().next().unwrap(),
-            Signature {
-                sig_type: SignatureType::Func,
-                params: vec![WasmPrimitiveType::F32, WasmPrimitiveType::I32],
-                results: vec![WasmPrimitiveType::F32]
-            }
-        );
         let module_functions = module.functions.borrow_mut();
         assert_eq!(
             module_functions["calc"].1,
