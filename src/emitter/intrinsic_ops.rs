@@ -15,14 +15,14 @@ pub(super) fn emit_intrinsic_exp(
         let arg = &args[0];
         match op {
             IntrinsicOperator::Add => match *emit_obj(module, codes, arg, env)? {
-                Type::Bool | Type::Unit => {
+                Type::Bool | Type::Unit | Type::Array(_) => {
                     bail!("Invalid argument for unary op. expected numeric type")
                 }
                 Type::I32 => Ok(Rc::new(Type::I32)),
                 Type::F32 => Ok(Rc::new(Type::F32)),
             },
             IntrinsicOperator::Sub => match *emit_obj(module, codes, arg, env)? {
-                Type::Bool | Type::Unit => {
+                Type::Bool | Type::Unit | Type::Array(_) => {
                     bail!("Invalid argument for unary op. expected numeric type")
                 }
                 Type::I32 => {
@@ -36,7 +36,7 @@ pub(super) fn emit_intrinsic_exp(
                 }
             },
             IntrinsicOperator::Mul => match *emit_obj(module, codes, arg, env)? {
-                Type::Bool | Type::Unit => {
+                Type::Bool | Type::Unit | Type::Array(_) => {
                     bail!("Invalid argument for unary op. expected numeric type")
                 }
                 Type::I32 => Ok(Rc::new(Type::I32)),
@@ -45,7 +45,7 @@ pub(super) fn emit_intrinsic_exp(
             IntrinsicOperator::Div => {
                 codes.push(OpCode::F32Const(1.0));
                 match *emit_obj(module, codes, arg, env)? {
-                    Type::Bool | Type::Unit => {
+                    Type::Bool | Type::Unit | Type::Array(_) => {
                         bail!("Invalid argument for unary op. expected numeric type")
                     }
                     Type::I32 => {
@@ -82,9 +82,9 @@ pub(super) fn emit_intrinsic_exp(
                 for arg in &args[1..] {
                     let current_result = emit_obj(module, current_codes, arg, env.clone())?;
                     let opcode = match *last_result {
-                        Type::Bool | Type::Unit => bail!("hoge"),
+                        Type::Bool | Type::Unit | Type::Array(_) => bail!("hoge"),
                         Type::I32 => match *current_result {
-                            Type::Bool | Type::Unit => bail!("hoge"),
+                            Type::Bool | Type::Unit | Type::Array(_) => bail!("hoge"),
                             Type::I32 => match op {
                                 IntrinsicOperator::Add => OpCode::I32Add,
                                 IntrinsicOperator::Sub => OpCode::I32Sub,
@@ -105,7 +105,7 @@ pub(super) fn emit_intrinsic_exp(
                             }
                         },
                         Type::F32 => match *current_result {
-                            Type::Bool | Type::Unit => bail!("hoge"),
+                            Type::Bool | Type::Unit | Type::Array(_) => bail!("hoge"),
                             Type::I32 => {
                                 current_codes.push(OpCode::F32ConvertI32S);
                                 match op {
@@ -147,6 +147,7 @@ pub(super) fn emit_intrinsic_exp(
                     let right_type = emit_obj(module, right_codes, right, env.clone())?;
                     match *left_type {
                         Type::Unit => bail!("Unit type cannot be compared."),
+                        Type::Array(_) => bail!("Array type cannot be compared."),
                         Type::Bool => {
                             match op {
                                 IntrinsicOperator::Eq => right_codes.push(OpCode::I32Eq),
@@ -162,7 +163,7 @@ pub(super) fn emit_intrinsic_exp(
                             };
                         }
                         Type::I32 => match *right_type {
-                            Type::Bool | Type::Unit => bail!("hoge"),
+                            Type::Bool | Type::Unit | Type::Array(_) => bail!("hoge"),
                             Type::F32 => {
                                 left_codes.push(OpCode::F32ConvertI32S);
                                 match op {
@@ -184,7 +185,7 @@ pub(super) fn emit_intrinsic_exp(
                             },
                         },
                         Type::F32 => match *right_type {
-                            Type::Bool | Type::Unit => bail!("hoge"),
+                            Type::Bool | Type::Unit | Type::Array(_) => bail!("hoge"),
                             Type::F32 => {
                                 left_codes.push(OpCode::F32ConvertI32S);
                                 match op {

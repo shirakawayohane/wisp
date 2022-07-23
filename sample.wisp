@@ -21,9 +21,5 @@
                             b
                             a)))))))
 
-(defn loop-check []
-    (loop [i (range 0 10)]
-        (+ 1 1)))
-
 (export defn main []
     (addTwoAnd30 10 20))

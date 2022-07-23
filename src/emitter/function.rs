@@ -51,7 +51,7 @@ pub(super) fn emit_func(module: &mut Module, ast: &AST, env: Rc<RefCell<Env>>) -
         // TODO: Impl type symbol functionality
         let empty_type_env = TypeEnv::default();
 
-        let func_index = (*module.functions.clone()).borrow().len();
+        let func_index = (*module.functions.clone()).borrow().len() as u32;
         let new_env = Rc::new(RefCell::new(Env::extend(env.clone())));
         let mut local_index = 0;
         for arg in &args {
@@ -59,7 +59,7 @@ pub(super) fn emit_func(module: &mut Module, ast: &AST, env: Rc<RefCell<Env>>) -
                 arg.0,
                 Variable {
                     pointer: Pointer::Local(local_index),
-                    t: resolve_type(arg.1, &empty_type_env),
+                    t: resolve_type(arg.1, &empty_type_env)?,
                 },
             );
             local_index += 1;
@@ -69,8 +69,8 @@ pub(super) fn emit_func(module: &mut Module, ast: &AST, env: Rc<RefCell<Env>>) -
         let arg_types = args
             .iter()
             .map(|(_, type_ast)| resolve_type(type_ast, &empty_type_env))
-            .collect::<Vec<_>>();
-        let result_type = resolve_type(result_type_ast, &empty_type_env);
+            .collect::<Result<Vec<Rc<Type>>>>()?;
+        let result_type = resolve_type(result_type_ast, &empty_type_env)?;
 
         let mut func_body = Vec::new();
 
@@ -105,7 +105,7 @@ pub(super) fn emit_func(module: &mut Module, ast: &AST, env: Rc<RefCell<Env>>) -
                         .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>(),
-            results: get_primitive_types(resolve_type(result_type_ast, &empty_type_env))
+            results: get_primitive_types(resolve_type(result_type_ast, &empty_type_env)?)
                 .iter()
                 .filter(|x| x.is_some())
                 .map(|x| x.unwrap())

@@ -142,6 +142,36 @@ fn encode_function_body(writer: &mut impl Write, func: &Function) -> Result<()> 
                 writer.write(&[0x24])?;
                 encode_leb128(writer, *index)?;
             }
+            OpCode::I32Load { offset, alignment } => {
+                writer.write(&[0x28])?;
+                encode_leb128(writer, *offset)?;
+                encode_leb128(writer, *alignment)?;
+            }
+            OpCode::I32Store { offset, alignment } => {
+                writer.write(&[0x36])?;
+                encode_leb128(writer, *offset)?;
+                encode_leb128(writer, *alignment)?;
+            }
+            OpCode::I32Load8U { offset, alignment } => {
+                writer.write(&[0x2D])?;
+                encode_leb128(writer, *offset)?;
+                encode_leb128(writer, *alignment)?;
+            }
+            OpCode::I32Store8 { offset, alignment } => {
+                writer.write(&[0x3A])?;
+                encode_leb128(writer, *offset)?;
+                encode_leb128(writer, *alignment)?;
+            }
+            OpCode::F32Load { offset, alignment } => {
+                writer.write(&[0x2A])?;
+                encode_leb128(writer, *offset)?;
+                encode_leb128(writer, *alignment)?;
+            }
+            OpCode::F32Store { offset, alignment } => {
+                writer.write(&[0x38])?;
+                encode_leb128(writer, *offset)?;
+                encode_leb128(writer, *alignment)?;
+            }
             OpCode::F32Const(n) => {
                 writer.write(&[0x43])?;
                 writer.write(&n.to_le_bytes())?;
@@ -173,6 +203,12 @@ fn encode_function_body(writer: &mut impl Write, func: &Function) -> Result<()> 
                     | OpCode::GlobalGet(_)
                     | OpCode::GlobalSet(_)
                     | OpCode::Call(_)
+                    | OpCode::I32Load {offset: _, alignment: _}
+                    | OpCode::I32Store {offset: _, alignment: _}
+                    | OpCode::I32Load8U { offset: _, alignment: _ }
+                    | OpCode::I32Store8 { offset: _, alignment: _ }
+                    | OpCode::F32Load {offset: _, alignment: _}
+                    | OpCode::F32Store {offset: _, alignment: _}
                     | OpCode::LocalDecl(_) => unreachable!(),
                     OpCode::Else => 0x05,
                     OpCode::Drop => 0x1A,
@@ -235,6 +271,17 @@ fn encode_function_section(writer: &mut impl Write, functions: &Vec<&Function>) 
     Ok(())
 }
 
+fn encode_memory_section(writer: &mut impl Write) -> Result<()> {
+    let memory_section = &mut Vec::new();
+    let num_memories : u64 = 1;
+    encode_leb128(memory_section, num_memories)?;
+    memory_section.push(0); // flags
+    memory_section.push(0x10); // initial
+    encode_leb128(writer, memory_section.len() as u64)?;
+    writer.write(memory_section)?;
+    Ok(())
+}
+
 fn encode_export_section(writer: &mut impl Write, exports: &Vec<&Export>) -> Result<()> {
     writer.write(&[0x07])?; // section function: 7
     let mut export_section = Vec::new();
@@ -288,24 +335,34 @@ pub fn compile_into_wasm<W: Write>(writer: &mut BufWriter<W>, source: &str) -> R
     writer.write(&[0x00, 0x61, 0x73, 0x6d])?; // WASM magic number
     writer.write(&[0x01, 0x00, 0x00, 0x00])?; // WASM binary version
 
+    // Type section
     encode_type_section(writer, signatures)?;
     writer.flush()?;
 
+    // Function section
     encode_function_section(writer, &functions)?;
     writer.flush()?;
 
+    // Memory section
+    encode_memory_section(writer)?;
+    writer.flush()?;
+
+    // Global section
     let module_globals = module.globals.borrow();
     let mut globals_with_index = module_globals.iter().map(|x| x.1).collect::<Vec<_>>();
     globals_with_index.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
     let globals = globals_with_index.iter().map(|x| &x.1).collect::<Vec<_>>();
     encode_global_section(writer, &globals)?;
+    writer.flush()?;
 
+    // Export section
     encode_export_section(
         writer,
         &module.exports.iter().map(|x| x).collect::<Vec<_>>(),
     )?;
     writer.flush()?;
 
+    // Code section
     encode_code_section(writer, &functions)?;
     writer.flush()?;
 

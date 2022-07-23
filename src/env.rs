@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::{RefCell, Cell}, collections::HashMap, rc::Rc};
 
 use crate::resolver::Type;
 
@@ -18,6 +18,7 @@ pub struct Variable {
 pub struct Env {
     parent: Option<Rc<RefCell<Env>>>,
     vars: HashMap<String, Variable>,
+    pub stack_cnt: Cell<u32>
 }
 
 impl Env {
@@ -25,6 +26,7 @@ impl Env {
         Env {
             vars: HashMap::new(),
             parent: Some(parent),
+            stack_cnt: Cell::new(0)
         }
     }
     pub fn get(&self, name: &str) -> Option<Variable> {

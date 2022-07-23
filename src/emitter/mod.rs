@@ -4,6 +4,7 @@ mod function;
 mod intrinsic_ops;
 mod special_forms;
 mod global;
+mod vector;
 
 pub use encoder::compile_into_wasm;
 
@@ -81,6 +82,12 @@ pub enum OpCode {
     GlobalSet(u32),
     LocalDecl(WasmPrimitiveType),
     Call(u32),
+    I32Store { offset: u32, alignment: u32 },
+    I32Store8 { offset: u32, alignment: u32 },
+    I32Load { offset: u32, alignment: u32 },
+    I32Load8U { offset: u32, alignment: u32 },
+    F32Store { offset: u32, alignment: u32 },
+    F32Load { offset: u32, alignment: u32 },
     I32Const(i32),
     F32Const(f32),
     I32Add,
@@ -112,8 +119,8 @@ pub enum OpCode {
 pub struct Module {
     pub signatures: HashMap<Signature, u16>,
     pub exports: Vec<Export>,
-    pub functions: Rc<RefCell<HashMap<String, (usize, Function)>>>,
-    pub globals: Rc<RefCell<HashMap<String, (usize, Global)>>>,
+    pub functions: Rc<RefCell<HashMap<String, (u32, Function)>>>,
+    pub globals: Rc<RefCell<HashMap<String, (u32, Global)>>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -170,8 +177,19 @@ fn emit_toplevel(module: &mut Module, ast: &AST, env: Rc<RefCell<Env>>) -> Resul
     }
 }
 
+const STACK_POINTER: (u32, Global) = (0, Global {
+    is_mutable: true,
+    value: GlobalValue::I32(1048576)
+});
+
+fn emit_builtin_vars(module: &mut Module) -> Result<()> {
+    module.globals.borrow_mut().insert("__stack_pointer".to_string(),  STACK_POINTER);
+    Ok(())
+}
+
 fn emit_module(module: &mut Module, ast: &AST) -> Result<()> {
     let env = Env::create();
+    emit_builtin_vars(module)?;
     let toplevels = match ast {
         AST::Module(tops) => tops,
         _ => return Err(anyhow!("Invalid argument.")),
@@ -181,6 +199,7 @@ fn emit_module(module: &mut Module, ast: &AST) -> Result<()> {
     }
     Ok(())
 }
+
 pub fn emit(module: &mut Module, source: &str) -> Result<()> {
     let module_ast = parse_source(source)?;
     emit_module(module, &module_ast)

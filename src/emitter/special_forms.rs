@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc, borrow::Borrow};
+use std::{cell::RefCell, rc::Rc};
 use crate::{parser::AST, resolver::Type, env::Env, emitter::expression::emit_obj};
 use super::*;
 use anyhow::{Result, ensure, bail};
@@ -13,6 +13,16 @@ pub(super) fn emit_scope(
         let last = index == forms.len() - 1;
         if last {
             let result_type = emit_obj(module, codes, &form, env.clone())?;
+
+            // Drop stack
+            let stack_cnt = env.borrow().stack_cnt.get();
+            if stack_cnt > 0 {
+                codes.push(OpCode::GlobalGet(STACK_POINTER.0));
+                codes.push(OpCode::I32Const(stack_cnt as i32));
+                codes.push(OpCode::I32Sub);
+                codes.push(OpCode::GlobalSet(STACK_POINTER.0));
+            }
+
             return Ok(result_type);
         } else {
             let emitted_type = emit_obj(module, codes, &form, env.clone())?;
@@ -66,7 +76,7 @@ pub(super) fn emit_let(
                             None => (),
                             Some(_) => bail!("redefinition of {}", variable_name),
                         }
-                        match value_type.borrow() {
+                        match *value_type {
                             Type::F32 => {
                                 codes.push(OpCode::LocalDecl(WasmPrimitiveType::F32));
                                 codes.push(OpCode::LocalSet(local_index));
@@ -79,7 +89,11 @@ pub(super) fn emit_let(
                                 codes.push(OpCode::LocalDecl(WasmPrimitiveType::I32));
                                 codes.push(OpCode::LocalSet(local_index));
                             }
-                            Type::Unit => bail!("hoge"),
+                            Type::Array(_) => {
+                                codes.push(OpCode::LocalDecl(WasmPrimitiveType::I32)); // pointer
+                                codes.push(OpCode::LocalSet(local_index));
+                            },
+                            Type::Unit => {},
                         }
                     }
                     AST::SymbolWithAnnotation(_, _) => {

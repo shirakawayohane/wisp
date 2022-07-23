@@ -7,6 +7,7 @@ pub enum TypeAST {
     F32,
     Bool,
     Unit,
+    Array(Box<TypeAST>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -37,6 +38,13 @@ fn parse_type(tokens: &mut Vec<Token>) -> Result<TypeAST> {
         Some(Token::Symbol("i32")) => TypeAST::I32,
         Some(Token::Symbol("f32")) => TypeAST::F32,
         Some(Token::Symbol("bool")) => TypeAST::Bool,
+        Some(Token::LBracket) => {
+            let item_type = parse_type(tokens)?;
+            ensure!(!tokens.is_empty(), "not enough tokens");
+            ensure!(*tokens.last().unwrap() == Token::RBracket, "expected ']'");
+            tokens.pop();
+            TypeAST::Array(Box::new(item_type))
+        }
         _ => todo!(),
     })
 }
@@ -73,13 +81,16 @@ pub fn parse<'a>(tokens: &mut Vec<Token<'a>>) -> Result<AST<'a>> {
             }
         }
         Token::RParen => unreachable!(),
-        Token::RBracket => unreachable!(),
+        Token::RBracket => {
+            dbg!(&tokens);
+            unreachable!()
+        }
         Token::Colon => unreachable!("Colon should be processed in Symbol arm"),
         Token::True => AST::BoolLiteral(true),
         Token::False => AST::BoolLiteral(false),
         Token::And => AST::And,
         Token::Or => AST::Or,
-        Token::Not => AST::Not
+        Token::Not => AST::Not,
     })
 }
 
@@ -192,6 +203,38 @@ mod tests {
                 AST::SymbolWithAnnotation("get-true", TypeAST::Bool),
                 AST::Vector(vec![]),
                 AST::BoolLiteral(true)
+            ])])
+        )
+    }
+    #[test]
+    fn test_parse_array_type() {
+        let tokens = &mut vec![Token::LBracket, Token::Symbol("i32"), Token::RBracket];
+        tokens.reverse();
+        let ast = parse_type(tokens).unwrap();
+        dbg!(&tokens);
+        assert!(tokens.is_empty());
+        assert_eq!(ast, TypeAST::Array(Box::new(TypeAST::I32)))
+    }
+    #[test]
+    fn test_array_arg() {
+        let ast = parse_source(
+            "
+        (defn first: i32
+            [arr: [i32]]
+            (0 arr))
+        ",
+        )
+        .unwrap();
+        assert_eq!(
+            ast,
+            AST::Module(vec![AST::List(vec![
+                AST::Symbol("defn"),
+                AST::SymbolWithAnnotation("first", TypeAST::I32),
+                AST::Vector(vec![AST::SymbolWithAnnotation(
+                    "arr",
+                    TypeAST::Array(Box::new(TypeAST::I32))
+                )]),
+                AST::List(vec![AST::NumberLiteral("0"), AST::Symbol("arr")])
             ])])
         )
     }

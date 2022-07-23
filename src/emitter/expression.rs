@@ -1,4 +1,4 @@
-use super::{*, special_forms::{emit_if, emit_let}, intrinsic_ops::emit_intrinsic_exp};
+use super::{*, special_forms::{emit_if, emit_let}, intrinsic_ops::emit_intrinsic_exp, vector::*};
 use crate::{env::Env, parser::AST, resolver::Type};
 use anyhow::{bail, Result, Context};
 use std::{cell::RefCell, rc::Rc};
@@ -57,9 +57,12 @@ pub(super) fn emit_list(
                             emit_function_call(module, codes, *index as u32, func, &list[1..], env)?
                         }
                     }
+                },
+                AST::NumberLiteral(numstr) => {
+                    let index = numstr.parse::<u32>()?;
+                    emit_index_get(module, codes, index, &list[1], env)?
                 }
                 AST::Module(_)
-                | AST::NumberLiteral(_)
                 | AST::BoolLiteral(_)
                 | AST::SymbolWithAnnotation(_, _)
                 | AST::List(_)
@@ -95,6 +98,7 @@ pub(super) fn emit_obj(
 ) -> Result<Rc<Type>> {
     match ast {
         AST::List(_) => return emit_list(module, codes, ast, env),
+        AST::Vector(v) => emit_vector(module, codes, v, env),
         // TODO: Infer type
         AST::NumberLiteral(literal) => {
             if let Ok(i32_val) = literal.parse::<i32>() {
@@ -124,7 +128,7 @@ pub(super) fn emit_obj(
                 }
             },
         },
-        _ => todo!(),
+        _ => bail!("Cannot evaluate {:?}", ast)
     }
 }
 
