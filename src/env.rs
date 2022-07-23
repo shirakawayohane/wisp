@@ -4,7 +4,8 @@ use crate::resolver::Type;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Pointer {
-    Local(u8),
+    Local(u32),
+    Global(u32),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -46,7 +47,8 @@ impl Env {
             .iter()
             .filter(|(_, v)| {
                 match v.pointer {
-                    Pointer::Local(_) => true
+                    Pointer::Local(_) => true,
+                    Pointer::Global(_) => false,
                 }
             })
             .count();
@@ -58,6 +60,10 @@ impl Env {
             ret += n;
         }
         ret
+    }
+
+    pub fn create() -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Env::default()))
     }
 }
 

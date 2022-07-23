@@ -53,7 +53,7 @@ pub(super) fn emit_let(
                     AST::Symbol(variable_name) => {
                         let value = &bindings[i * 2 + 1];
                         let value_type = emit_obj(module, codes, value, new_env.clone())?;
-                        let local_index = (*new_env.clone()).borrow().count_local_vars() as u8;
+                        let local_index = (*new_env.clone()).borrow().count_local_vars() as u32;
                         let pointer = Pointer::Local(local_index);
                         // prohibit local var redefinition
                         match new_env.borrow_mut().set(

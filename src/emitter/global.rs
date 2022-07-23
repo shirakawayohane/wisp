@@ -7,7 +7,7 @@ pub(super) fn emit_global(
     module: &mut Module,
     forms: &[AST],
     is_mutable: bool,
-    _: Rc<RefCell<Env>>,
+    env: Rc<RefCell<Env>>,
 ) -> Result<()> {
     ensure!(forms.len() == 2, "expect two arugments");
     let (name, t, value_ast) = match &forms[0] {
@@ -38,6 +38,8 @@ pub(super) fn emit_global(
         Type::Unit => bail!("Only primitive literals are supported for global variable for now"),
     };
     globals.insert(name.to_string(), (index, Global { is_mutable, value }));
+
+    env.borrow_mut().set(name, Variable { pointer: Pointer::Global(index as u32), t: resolved_type });
 
     Ok(())
 }
@@ -140,5 +142,43 @@ mod tests {
                 }
             )
         );
+    }
+
+    #[test]
+    fn test_env() {
+        let module = &mut Module::default();
+        let env = Env::create();
+        emit_global(module, &[
+            AST::SymbolWithAnnotation("hoge", TypeAST::I32),
+            AST::NumberLiteral("10")
+        ], false, env.clone()).unwrap();
+        let hoge = env.borrow().get("hoge").unwrap();
+        assert_eq!(
+            hoge,
+            Variable {
+                t: Rc::new(Type::I32),
+                pointer: Pointer::Global(0)
+            }
+        )
+    }
+
+    #[test]
+    fn test_get_global() {
+        let source = "
+        (define num: i32 10)
+        (defn get-global:i32
+            []
+            num)
+        ";
+        let mut module = Module::default();
+        emit(&mut module, source).unwrap();
+        let functions = module.functions.borrow_mut();
+        assert_eq!(
+            functions["get-global"].1.body,
+            vec![
+                OpCode::GlobalGet(0),
+                OpCode::End
+            ]
+        )
     }
 }

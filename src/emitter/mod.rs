@@ -74,8 +74,11 @@ pub enum OpCode {
     Else,
     Drop,
     End,
-    LocalGet(u8),
-    LocalSet(u8),
+    LocalGet(u32),
+    LocalSet(u32),
+    GlobalGet(u32),
+    #[allow(dead_code)]
+    GlobalSet(u32),
     LocalDecl(WasmPrimitiveType),
     Call(u32),
     I32Const(i32),
@@ -168,7 +171,7 @@ fn emit_toplevel(module: &mut Module, ast: &AST, env: Rc<RefCell<Env>>) -> Resul
 }
 
 fn emit_module(module: &mut Module, ast: &AST) -> Result<()> {
-    let env = Rc::new(RefCell::new(Env::default()));
+    let env = Env::create();
     let toplevels = match ast {
         AST::Module(tops) => tops,
         _ => return Err(anyhow!("Invalid argument.")),

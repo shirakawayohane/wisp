@@ -118,6 +118,10 @@ pub(super) fn emit_obj(
                     codes.push(OpCode::LocalGet(index));
                     return Ok(variable.t.clone());
                 }
+                Pointer::Global(index) => {
+                    codes.push(OpCode::GlobalGet(index));
+                    return Ok(variable.t.clone())
+                }
             },
         },
         _ => todo!(),

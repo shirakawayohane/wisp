@@ -126,8 +126,20 @@ fn write_function_body(writer: &mut impl Write, func: &Function) -> Result<()> {
     for opcode in &opcodes {
         match opcode {
             OpCode::LocalDecl(_) => unreachable!(),
+            OpCode::LocalGet(n) => {
+                writer.write(&[0x20])?;
+                encode_leb128(writer, *n)?;
+            }
             OpCode::LocalSet(index) => {
                 writer.write(&[0x21])?;
+                encode_leb128(writer, *index)?;
+            }
+            OpCode::GlobalGet(n) => {
+                writer.write(&[0x23])?;
+                encode_leb128(writer, *n)?;
+            }
+            OpCode::GlobalSet(index) => {
+                writer.write(&[0x24])?;
                 encode_leb128(writer, *index)?;
             }
             OpCode::F32Const(n) => {
@@ -137,10 +149,6 @@ fn write_function_body(writer: &mut impl Write, func: &Function) -> Result<()> {
             OpCode::I32Const(n) => {
                 writer.write(&[0x41])?;
                 encode_s_leb128(writer, *n)?;
-            }
-            OpCode::LocalGet(n) => {
-                writer.write(&[0x20])?;
-                encode_leb128(writer, *n)?;
             }
             OpCode::Call(index) => {
                 writer.write(&[0x10])?;
@@ -162,6 +170,8 @@ fn write_function_body(writer: &mut impl Write, func: &Function) -> Result<()> {
                     | OpCode::I32Const(_)
                     | OpCode::LocalGet(_)
                     | OpCode::LocalSet(_)
+                    | OpCode::GlobalGet(_)
+                    | OpCode::GlobalSet(_)
                     | OpCode::Call(_)
                     | OpCode::LocalDecl(_) => unreachable!(),
                     OpCode::Else => 0x05,
