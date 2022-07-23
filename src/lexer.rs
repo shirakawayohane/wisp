@@ -218,7 +218,7 @@ mod tests {
             tokens,
         vec![
             Token::LParen,
-            Token::Symbol("and"),
+            Token::And,
             Token::LParen,
             Token::Gt,
             Token::Symbol("a"),

@@ -1,11 +1,10 @@
 use anyhow::{ensure, Result};
 use std::{fs::File, io::{BufWriter}, path::{Path, PathBuf}};
 
-use crate::{compiler::compile_into_wasm};
+use crate::emitter::compile_into_wasm;
 
 mod lexer;
 mod parser;
-mod encoder;
 mod env;
 mod emitter;
 mod resolver;
