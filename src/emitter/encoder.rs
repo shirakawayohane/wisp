@@ -32,9 +32,11 @@ fn encode_global(writer: &mut impl Write, global: &Global) -> Result<()> {
     writer.write(&[primitive_type as u8, if global.is_mutable { 1 } else { 0 }])?;
     match global.value {
         GlobalValue::I32(v) => {
-            encode_leb128(writer, v as u64)?;
+            writer.write(&[0x41])?; // i32.const
+            encode_s_leb128(writer, v as i32)?;
         }
         GlobalValue::F32(v) => {
+            writer.write(&[0x43])?; // f32.const
             writer.write(&v.to_le_bytes())?;
         }
     }
@@ -47,7 +49,7 @@ fn encode_global_section(writer: &mut impl Write, globals: &[&Global]) -> Result
     let global_section = &mut Vec::new();
     encode_leb128(global_section, globals.len() as u64)?;
     for global in globals {
-        encode_global(writer, global)?;
+        encode_global(global_section, global)?;
     }
     encode_leb128(writer, global_section.len() as u64)?;
     writer.write(global_section)?;
@@ -144,33 +146,33 @@ fn encode_function_body(writer: &mut impl Write, func: &Function) -> Result<()> 
             }
             OpCode::I32Load { offset, alignment } => {
                 writer.write(&[0x28])?;
-                encode_leb128(writer, *offset)?;
                 encode_leb128(writer, *alignment)?;
+                encode_leb128(writer, *offset)?;
             }
             OpCode::I32Store { offset, alignment } => {
                 writer.write(&[0x36])?;
-                encode_leb128(writer, *offset)?;
                 encode_leb128(writer, *alignment)?;
+                encode_leb128(writer, *offset)?;
             }
             OpCode::I32Load8U { offset, alignment } => {
                 writer.write(&[0x2D])?;
-                encode_leb128(writer, *offset)?;
                 encode_leb128(writer, *alignment)?;
+                encode_leb128(writer, *offset)?;
             }
             OpCode::I32Store8 { offset, alignment } => {
                 writer.write(&[0x3A])?;
-                encode_leb128(writer, *offset)?;
                 encode_leb128(writer, *alignment)?;
+                encode_leb128(writer, *offset)?;
             }
             OpCode::F32Load { offset, alignment } => {
                 writer.write(&[0x2A])?;
-                encode_leb128(writer, *offset)?;
                 encode_leb128(writer, *alignment)?;
+                encode_leb128(writer, *offset)?;
             }
             OpCode::F32Store { offset, alignment } => {
                 writer.write(&[0x38])?;
-                encode_leb128(writer, *offset)?;
                 encode_leb128(writer, *alignment)?;
+                encode_leb128(writer, *offset)?;
             }
             OpCode::F32Const(n) => {
                 writer.write(&[0x43])?;
@@ -272,6 +274,7 @@ fn encode_function_section(writer: &mut impl Write, functions: &Vec<&Function>) 
 }
 
 fn encode_memory_section(writer: &mut impl Write) -> Result<()> {
+    writer.write(&[0x05])?;
     let memory_section = &mut Vec::new();
     let num_memories : u64 = 1;
     encode_leb128(memory_section, num_memories)?;
@@ -436,6 +439,30 @@ mod tests {
         assert_eq!(buf, vec![0x03, 0x61, 0x62, 0x63]);
     }
     #[test]
+    fn test_encode_global_section() {
+        let mut buf = Vec::new();
+        let globals = &[
+            &Global {
+                is_mutable: true,
+                value: GlobalValue::I32(1048576)
+            }
+        ];
+        encode_global_section(&mut buf, globals).unwrap();
+        assert_eq!(
+            buf,
+            vec![
+                0x06,
+                0x09,
+                0x01,
+                0x7f,
+                0x01,
+                0x41,
+                0x80, 0x80, 0xc0, 0x00,
+                0x0b
+            ]
+        )
+    }
+    #[test]
     fn test_bin_ops() {
         let mut buf = Vec::<u8>::new();
         unsafe {
@@ -466,9 +493,19 @@ mod tests {
                 0x02, // section size
                 0x01, // num funcs
                 0x00, // signature index
+                0x05, // memory section
+                0x03, // section size
+                0x01, // num memories
+                0x00, // flag
+                0x10, // initial size
                 0x06, // global section
-                0x01, // section size
-                0x00, // num globals
+                0x09, // section size
+                0x01, // num globals
+                0x7f, // i32,
+                0x01, // mutable
+                0x41, // i32.const
+                0x80, 0x80, 0xc0, 0x00, // stack pointer value,
+                0x0b, // end
                 0x07, // export section
                 0x01, // section size,
                 0x00, // num exports
