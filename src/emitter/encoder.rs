@@ -136,6 +136,10 @@ fn encode_function_body(writer: &mut impl Write, func: &Function) -> Result<()> 
                 writer.write(&[0x21])?;
                 encode_leb128(writer, *index)?;
             }
+            OpCode::LocalTee(index) => {
+                writer.write(&[0x22])?;
+                encode_leb128(writer, *index)?;
+            }
             OpCode::GlobalGet(n) => {
                 writer.write(&[0x23])?;
                 encode_leb128(writer, *n)?;
@@ -202,6 +206,7 @@ fn encode_function_body(writer: &mut impl Write, func: &Function) -> Result<()> 
                     | OpCode::I32Const(_)
                     | OpCode::LocalGet(_)
                     | OpCode::LocalSet(_)
+                    | OpCode::LocalTee(_)
                     | OpCode::GlobalGet(_)
                     | OpCode::GlobalSet(_)
                     | OpCode::Call(_)

@@ -21,8 +21,12 @@ pub(super) fn emit_vector(
     if items.len() == 0 {
         return Ok(Rc::new(Type::Array(Rc::new(Type::Unit))));
     }
-
+    let stack_pointer_local_addr = codes.iter().filter(|x| 
+        if let OpCode::LocalDecl(_) = x {true} else {false}
+    ).count() as u32;
+    codes.push(OpCode::LocalDecl(WasmPrimitiveType::I32));
     codes.push(OpCode::GlobalGet(STACK_POINTER.0));
+    codes.push(OpCode::LocalTee(stack_pointer_local_addr));
     codes.push(OpCode::I32Const(items.len() as i32));
     codes.push(OpCode::I32Store {
         offset,
@@ -31,7 +35,7 @@ pub(super) fn emit_vector(
     offset += 4 as u32;
 
     for item in items {
-        codes.push(OpCode::GlobalGet(STACK_POINTER.0));
+        codes.push(OpCode::LocalGet(stack_pointer_local_addr));
         let current_type = emit_obj(module, codes, item, env.clone())?;
         if last_type.is_some() {
             ensure!(
@@ -67,10 +71,11 @@ pub(super) fn emit_vector(
     }
     let stack_cnt = &env.borrow().stack_cnt;
     stack_cnt.set(stack_cnt.get() + offset);
-    codes.push(OpCode::GlobalGet(STACK_POINTER.0));
+    codes.push(OpCode::LocalGet(stack_pointer_local_addr));
     codes.push(OpCode::I32Const(offset as i32));
     codes.push(OpCode::I32Add);
     codes.push(OpCode::GlobalSet(STACK_POINTER.0));
+    codes.push(OpCode::I32Const(stack_pointer_local_addr as i32));
     Ok(Rc::new(Type::Array(last_type.unwrap())))
 }
 
@@ -130,34 +135,37 @@ mod tests {
         assert_eq!(
             *function,
             vec![
+                OpCode::LocalDecl(WasmPrimitiveType::I32),
                 OpCode::GlobalGet(STACK_POINTER.0),
+                OpCode::LocalTee(0),
                 OpCode::I32Const(3),
                 OpCode::I32Store {
                     offset: 0,
                     alignment: 2
                 },
-                OpCode::GlobalGet(STACK_POINTER.0),
+                OpCode::LocalGet(0),
                 OpCode::I32Const(1),
                 OpCode::I32Store {
                     offset: 4,
                     alignment: 2
                 },
-                OpCode::GlobalGet(STACK_POINTER.0),
+                OpCode::LocalGet(0),
                 OpCode::I32Const(2),
                 OpCode::I32Store {
                     offset: 8,
                     alignment: 2
                 },
-                OpCode::GlobalGet(STACK_POINTER.0),
+                OpCode::LocalGet(0),
                 OpCode::I32Const(3),
                 OpCode::I32Store {
                     offset: 12,
                     alignment: 2
                 },
-                OpCode::GlobalGet(STACK_POINTER.0),
+                OpCode::LocalGet(0),
                 OpCode::I32Const(16),
                 OpCode::I32Add,
                 OpCode::GlobalSet(0),
+                OpCode::I32Const(0),
                 OpCode::GlobalGet(STACK_POINTER.0),
                 OpCode::I32Const(16),
                 OpCode::I32Sub,

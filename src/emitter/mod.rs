@@ -77,6 +77,7 @@ pub enum OpCode {
     End,
     LocalGet(u32),
     LocalSet(u32),
+    LocalTee(u32),
     GlobalGet(u32),
     #[allow(dead_code)]
     GlobalSet(u32),
