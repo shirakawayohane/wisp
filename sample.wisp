@@ -21,5 +21,12 @@
                             b
                             a)))))))
 
+(defn first: i32 
+    [arr: [i32]]
+    (0 arr))
+
+(defn call-first []
+    (first [1,2,3]))
+
 (export defn main []
     (addTwoAnd30 10 20))
