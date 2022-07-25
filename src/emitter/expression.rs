@@ -1,6 +1,11 @@
-use super::{*, special_forms::{emit_if, emit_let}, intrinsic_ops::emit_intrinsic_exp, vector::*};
+use super::{
+    intrinsic_ops::emit_intrinsic_exp,
+    special_forms::{emit_if, emit_let},
+    vector::*,
+    *,
+};
 use crate::{env::Env, parser::AST, resolver::Type};
-use anyhow::{bail, Result, Context};
+use anyhow::{bail, Context, Result, ensure};
 use std::{cell::RefCell, rc::Rc};
 
 pub(super) fn emit_list(
@@ -48,19 +53,45 @@ pub(super) fn emit_list(
                         "let" => emit_let(module, codes, ast, env)?,
                         "if" => emit_if(module, codes, ast, env)?,
                         _ => {
-                            // emit function call
-                            let module_functions = module.functions.clone();
-                            let module_func_refmut = module_functions.borrow_mut();
-                            let (index, func) = module_func_refmut
-                                .get(*name)
-                                .with_context(|| format!("Unable to find function {:?}", &name))?;
-                            emit_function_call(module, codes, *index as u32, func, &list[1..], env)?
+                            if let Some(var) = env.clone().borrow().get(name) {
+                                match *var.t {
+                                    Type::I32 => match var.pointer {
+                                        Pointer::Local(addr) => {
+                                            codes.push(OpCode::LocalGet(addr));
+                                            emit_index_get(module, codes, &list[1], env)?
+                                        }
+                                        Pointer::Global(addr) => {
+                                            codes.push(OpCode::GlobalGet(addr));
+                                            emit_index_get(module, codes, &list[1], env)?
+                                        }
+                                    },
+                                    _ => bail!("{} cannot be evaluated as function", name)
+                                }
+                            } else {
+                                // emit function call
+                                let module_functions = module.functions.clone();
+                                let module_func_refmut = module_functions.borrow_mut();
+                                let (index, func) =
+                                    module_func_refmut.get(*name).with_context(|| {
+                                        format!("Unable to find function {:?}", &name)
+                                    })?;
+                                emit_function_call(
+                                    module,
+                                    codes,
+                                    *index as u32,
+                                    func,
+                                    &list[1..],
+                                    env.clone(),
+                                )?
+                            }
                         }
                     }
-                },
+                }
                 AST::NumberLiteral(numstr) => {
-                    let index = numstr.parse::<u32>()?;
-                    emit_index_get(module, codes, index, &list[1], env)?
+                    let index = numstr.parse::<u32>().map_err(|_| anyhow!("list beggining with floating point cannot be evaluated"))?;
+                    ensure!(list.len() == 2, "expect 2 forms, found {}", list.len());
+                    codes.push(OpCode::I32Const(index as i32));
+                    emit_index_get(module, codes, &list[1], env)?
                 }
                 AST::Module(_)
                 | AST::BoolLiteral(_)
@@ -124,11 +155,11 @@ pub(super) fn emit_obj(
                 }
                 Pointer::Global(index) => {
                     codes.push(OpCode::GlobalGet(index));
-                    return Ok(variable.t.clone())
+                    return Ok(variable.t.clone());
                 }
             },
         },
-        _ => bail!("Cannot evaluate {:?}", ast)
+        _ => bail!("Cannot evaluate {:?}", ast),
     }
 }
 

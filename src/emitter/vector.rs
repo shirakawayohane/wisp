@@ -75,44 +75,64 @@ pub(super) fn emit_vector(
     codes.push(OpCode::I32Const(offset as i32));
     codes.push(OpCode::I32Add);
     codes.push(OpCode::GlobalSet(STACK_POINTER.0));
-    codes.push(OpCode::I32Const(stack_pointer_local_addr as i32));
+    codes.push(OpCode::LocalGet(stack_pointer_local_addr as u32));
     Ok(Rc::new(Type::Array(last_type.unwrap())))
 }
+
+const SIZE_OF_ARRAY_LEN: u32 = 4;
 
 pub(super) fn emit_index_get(
     module: &mut Module,
     codes: &mut Vec<OpCode>,
-    index: u32,
     vec_ast: &AST,
-    env: Rc<RefCell<Env>>,
+    env: Rc<RefCell<Env>>
 ) -> Result<Rc<Type>> {
-    let vec_type = emit_obj(module, codes, vec_ast, env.clone())?;
-    match &*vec_type {
+    let temp_codes = &mut Vec::new();
+    let vec_type = emit_obj(module, temp_codes, vec_ast, env)?;
+    let elm_type = match &*vec_type {
+        Type::Array(elm_type) => elm_type,
+        _ => panic!("expected vec_type to be Array type")
+    };
+    match &**elm_type {
         Type::I32 => {
+            codes.push(OpCode::I32Const(4));
+            codes.push(OpCode::I32Mul);
+            codes.append(temp_codes);
+            codes.push(OpCode::I32Add);
             codes.push(OpCode::I32Load {
-                offset: 4 * index,
+                offset: SIZE_OF_ARRAY_LEN,
                 alignment: 2,
             });
             Ok(Rc::new(Type::I32))
         }
         Type::F32 => {
+            codes.push(OpCode::I32Const(4));
+            codes.push(OpCode::I32Mul);
+            codes.append(temp_codes);
+            codes.push(OpCode::I32Add);
             codes.push(OpCode::F32Load {
-                offset: 4 * index,
+                offset: SIZE_OF_ARRAY_LEN,
                 alignment: 2,
             });
             Ok(Rc::new(Type::F32))
         }
         Type::Bool => {
+            codes.append(temp_codes);
+            codes.push(OpCode::I32Add);
             codes.push(OpCode::I32Load8U {
-                offset: index,
+                offset: SIZE_OF_ARRAY_LEN,
                 alignment: 0,
             });
             Ok(Rc::new(Type::I32))
         }
         Type::Unit => Ok(Rc::new(Type::Unit)),
         Type::Array(elm_type) => {
+            codes.push(OpCode::I32Const(4));
+            codes.push(OpCode::I32Mul);
+            codes.append(temp_codes);
+            codes.push(OpCode::I32Add);
             codes.push(OpCode::I32Load {
-                offset: 4 * index,
+                offset: SIZE_OF_ARRAY_LEN,
                 alignment: 2,
             });
             Ok(elm_type.clone())
@@ -165,7 +185,7 @@ mod tests {
                 OpCode::I32Const(16),
                 OpCode::I32Add,
                 OpCode::GlobalSet(0),
-                OpCode::I32Const(0),
+                OpCode::LocalGet(0),
                 OpCode::GlobalGet(STACK_POINTER.0),
                 OpCode::I32Const(16),
                 OpCode::I32Sub,
@@ -201,13 +221,17 @@ mod tests {
         assert_eq!(
             *body,
             vec![
+                OpCode::I32Const(0),
+                OpCode::I32Const(4),
+                OpCode::I32Mul,
                 OpCode::LocalGet(0),
+                OpCode::I32Add,
                 OpCode::I32Load {
-                    offset: 0,
+                    offset: 4,
                     alignment: 2
                 },
                 OpCode::End
             ]
-        )
+        );
     }
 }
