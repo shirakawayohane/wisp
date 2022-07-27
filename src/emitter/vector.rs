@@ -234,4 +234,33 @@ mod tests {
             ]
         );
     }
+    #[test]
+    fn test_index_by_symbol() {
+        let module = &mut Module::default();
+        let source = "
+        (defn first: i32
+            [arr: [i32]]
+            (let [index 0]
+                (index arr)))";
+        emit(module, source).unwrap();
+        let body = &module.functions.borrow()["first"].1.body;
+        assert_eq!(
+            *body,
+            vec![
+                OpCode::I32Const(0),
+                OpCode::LocalDecl(WasmPrimitiveType::I32),
+                OpCode::LocalSet(1),
+                OpCode::LocalGet(1),
+                OpCode::I32Const(4),
+                OpCode::I32Mul,
+                OpCode::LocalGet(0),
+                OpCode::I32Add,
+                OpCode::I32Load {
+                    offset: 4,
+                    alignment: 2
+                },
+                OpCode::End
+            ]
+        )
+    }
 }
