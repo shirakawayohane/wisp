@@ -183,8 +183,14 @@ const STACK_POINTER: (u32, Global) = (0, Global {
     value: GlobalValue::I32(1048576)
 });
 
+const HEAP_BASE: (u32, Global) = (0, Global {
+    is_mutable: false,
+    value: GlobalValue::I32(2097152)
+});
+
 fn emit_builtin_vars(module: &mut Module) -> Result<()> {
     module.globals.borrow_mut().insert("__stack_pointer".to_string(),  STACK_POINTER);
+    module.globals.borrow_mut().insert("__heap_base".to_string(),  HEAP_BASE);
     Ok(())
 }
 

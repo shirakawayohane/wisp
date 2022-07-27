@@ -504,12 +504,17 @@ mod tests {
                 0x00, // flag
                 0x10, // initial size
                 0x06, // global section
-                0x09, // section size
-                0x01, // num globals
+                0x11, // section size
+                0x02, // num globals
                 0x7f, // i32,
                 0x01, // mutable
                 0x41, // i32.const
                 0x80, 0x80, 0xc0, 0x00, // stack pointer value,
+                0x0b, // end
+                0x7f, // i32
+                0x00, // immutable
+                0x41, // i32.const
+                0x80, 0x80, 0x80, 0x01, // stack pointer value,
                 0x0b, // end
                 0x07, // export section
                 0x01, // section size,
